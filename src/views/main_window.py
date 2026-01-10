@@ -1,19 +1,27 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
                                QMenuBar, QMenu, QToolBar, QFileDialog,
-                               QMessageBox, QSplitter, QStatusBar, QInputDialog)
+                               QMessageBox, QSplitter, QStatusBar, QInputDialog,
+                               QApplication)
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction, QKeySequence
+from PyQt6.QtGui import QAction, QKeySequence, QUndoStack, QUndoCommand
+import copy
 
 from src.models.project import Project
 from src.models.page import Page
-from src.views.canvas_scene import CanvasScene
+from src.models.speech_bubble import SpeechBubble
+from src.models.text_element import TextElement
+from src.views.canvas_scene import CanvasScene, PanelPolygonItem
 from src.views.canvas_view import CanvasView
 from src.views.page_list_widget import PageListWidget
 from src.views.panels.tool_panel import ToolPanel
 from src.views.panels.property_panel import PropertyPanel
 from src.services.export_service import ExportService
 from src.services.template_service import TemplateService
+from src.services.project_serializer import ProjectSerializer
 from src.utils.enums import ToolType
+from src.graphics.speech_bubble_item import SpeechBubbleGraphicsItem
+from src.graphics.text_item import TextGraphicsItem
+from src.graphics.divider_line_item import DividerLineItem
 
 
 class MainWindow(QMainWindow):
@@ -25,6 +33,14 @@ class MainWindow(QMainWindow):
         self._project = Project()
         self._current_page_index = 0
         self._scenes = {}
+        self._current_file_path = None
+        self._is_modified = False
+
+        # クリップボード（コピー/ペースト用）
+        self._clipboard = None
+
+        # Undo/Redo スタック
+        self._undo_stack = QUndoStack(self)
 
         self._setup_ui()
         self._setup_menu()
@@ -33,6 +49,7 @@ class MainWindow(QMainWindow):
         self._connect_signals()
 
         self._load_page(0)
+        self._update_title()
 
     def _setup_ui(self):
         central = QWidget()
@@ -74,6 +91,7 @@ class MainWindow(QMainWindow):
     def _setup_menu(self):
         menubar = self.menuBar()
 
+        # ===== ファイルメニュー =====
         file_menu = menubar.addMenu("ファイル(&F)")
 
         new_action = QAction("新規(&N)", self)
@@ -81,19 +99,38 @@ class MainWindow(QMainWindow):
         new_action.triggered.connect(self._on_new)
         file_menu.addAction(new_action)
 
+        open_action = QAction("開く(&O)...", self)
+        open_action.setShortcut(QKeySequence.StandardKey.Open)
+        open_action.triggered.connect(self._on_open)
+        file_menu.addAction(open_action)
+
         file_menu.addSeparator()
+
+        save_action = QAction("保存(&S)", self)
+        save_action.setShortcut(QKeySequence.StandardKey.Save)
+        save_action.triggered.connect(self._on_save)
+        file_menu.addAction(save_action)
+
+        save_as_action = QAction("名前を付けて保存(&A)...", self)
+        save_as_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        save_as_action.triggered.connect(self._on_save_as)
+        file_menu.addAction(save_as_action)
+
+        file_menu.addSeparator()
+
+        export_menu = file_menu.addMenu("エクスポート")
 
         export_png = QAction("PNG出力...", self)
         export_png.triggered.connect(self._on_export_png)
-        file_menu.addAction(export_png)
+        export_menu.addAction(export_png)
 
         export_jpg = QAction("JPG出力...", self)
         export_jpg.triggered.connect(self._on_export_jpg)
-        file_menu.addAction(export_jpg)
+        export_menu.addAction(export_jpg)
 
         export_pdf = QAction("PDF出力（全ページ）...", self)
         export_pdf.triggered.connect(self._on_export_pdf)
-        file_menu.addAction(export_pdf)
+        export_menu.addAction(export_pdf)
 
         file_menu.addSeparator()
 
@@ -102,7 +139,30 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
+        # ===== 編集メニュー =====
         edit_menu = menubar.addMenu("編集(&E)")
+
+        self._undo_action = self._undo_stack.createUndoAction(self, "元に戻す(&U)")
+        self._undo_action.setShortcut(QKeySequence.StandardKey.Undo)
+        edit_menu.addAction(self._undo_action)
+
+        self._redo_action = self._undo_stack.createRedoAction(self, "やり直し(&R)")
+        self._redo_action.setShortcut(QKeySequence.StandardKey.Redo)
+        edit_menu.addAction(self._redo_action)
+
+        edit_menu.addSeparator()
+
+        copy_action = QAction("コピー(&C)", self)
+        copy_action.setShortcut(QKeySequence.StandardKey.Copy)
+        copy_action.triggered.connect(self._on_copy)
+        edit_menu.addAction(copy_action)
+
+        paste_action = QAction("ペースト(&P)", self)
+        paste_action.setShortcut(QKeySequence.StandardKey.Paste)
+        paste_action.triggered.connect(self._on_paste)
+        edit_menu.addAction(paste_action)
+
+        edit_menu.addSeparator()
 
         delete_action = QAction("削除(&D)", self)
         delete_action.setShortcut(QKeySequence.StandardKey.Delete)
@@ -145,11 +205,12 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
         toolbar.addAction("新規", self._on_new)
+        toolbar.addAction("開く", self._on_open)
+        toolbar.addAction("保存", self._on_save)
         toolbar.addSeparator()
         toolbar.addAction("+ ページ", self._on_add_page)
         toolbar.addSeparator()
         toolbar.addAction("PNG", self._on_export_png)
-        toolbar.addAction("JPG", self._on_export_jpg)
         toolbar.addAction("PDF", self._on_export_pdf)
 
     def _setup_statusbar(self):
@@ -205,17 +266,190 @@ class MainWindow(QMainWindow):
 
     def _on_page_modified(self):
         self._page_list.update_thumbnail(self._current_page_index)
+        self._is_modified = True
+        self._update_title()
+
+    def _update_title(self):
+        """ウィンドウタイトルを更新"""
+        title = "漫画コマ割りエディタ"
+        if self._current_file_path:
+            import os
+            title = f"{os.path.basename(self._current_file_path)} - {title}"
+        else:
+            title = f"新規プロジェクト - {title}"
+        if self._is_modified:
+            title = f"* {title}"
+        self.setWindowTitle(title)
 
     def _on_new(self):
-        reply = QMessageBox.question(
-            self, "確認", "新規プロジェクトを作成しますか？\n保存されていない変更は失われます。",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        if self._is_modified:
+            reply = QMessageBox.question(
+                self, "確認", "新規プロジェクトを作成しますか？\n保存されていない変更は失われます。",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        self._project = Project()
+        self._scenes.clear()
+        self._current_file_path = None
+        self._is_modified = False
+        self._undo_stack.clear()
+        self._page_list.set_project(self._project)
+        self._load_page(0)
+        self._update_title()
+
+    def _on_open(self):
+        """プロジェクトを開く"""
+        if self._is_modified:
+            reply = QMessageBox.question(
+                self, "確認", "プロジェクトを開きますか？\n保存されていない変更は失われます。",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+        filepath, _ = QFileDialog.getOpenFileName(
+            self, "プロジェクトを開く", "",
+            "Manga Project (*.manga);;JSON Files (*.json);;All Files (*)"
         )
-        if reply == QMessageBox.StandardButton.Yes:
-            self._project = Project()
-            self._scenes.clear()
-            self._page_list.set_project(self._project)
-            self._load_page(0)
+        if filepath:
+            project = ProjectSerializer.load_from_file(filepath)
+            if project:
+                self._project = project
+                self._scenes.clear()
+                self._current_file_path = filepath
+                self._is_modified = False
+                self._undo_stack.clear()
+                self._page_list.set_project(self._project)
+                self._load_page(0)
+                self._update_title()
+            else:
+                QMessageBox.warning(self, "エラー", "プロジェクトの読み込みに失敗しました。")
+
+    def _on_save(self):
+        """プロジェクトを保存"""
+        if self._current_file_path:
+            self._save_to_file(self._current_file_path)
+        else:
+            self._on_save_as()
+
+    def _on_save_as(self):
+        """名前を付けて保存"""
+        filepath, _ = QFileDialog.getSaveFileName(
+            self, "名前を付けて保存", "",
+            "Manga Project (*.manga);;JSON Files (*.json)"
+        )
+        if filepath:
+            # 拡張子がなければ追加
+            if not filepath.endswith('.manga') and not filepath.endswith('.json'):
+                filepath += '.manga'
+            self._save_to_file(filepath)
+
+    def _save_to_file(self, filepath: str):
+        """ファイルに保存"""
+        if ProjectSerializer.save_to_file(self._project, filepath):
+            self._current_file_path = filepath
+            self._is_modified = False
+            self._update_title()
+            self._statusbar.showMessage("保存しました", 3000)
+        else:
+            QMessageBox.warning(self, "エラー", "保存に失敗しました。")
+
+    def _on_copy(self):
+        """選択アイテムをコピー"""
+        items = self._scene.selectedItems()
+        if not items:
+            return
+
+        item = items[0]
+        if isinstance(item, SpeechBubbleGraphicsItem):
+            # 吹き出しをコピー
+            self._clipboard = ('bubble', copy.deepcopy(item.bubble))
+        elif isinstance(item, TextGraphicsItem):
+            # テキストをコピー
+            self._clipboard = ('text', copy.deepcopy(item.text_element))
+        elif isinstance(item, DividerLineItem):
+            # 分割線をコピー
+            self._clipboard = ('divider', copy.deepcopy(item.divider))
+
+        self._statusbar.showMessage("コピーしました", 2000)
+
+    def _on_paste(self):
+        """ペースト"""
+        if not self._clipboard:
+            return
+
+        item_type, data = self._clipboard
+        page = self._project.pages[self._current_page_index]
+
+        # 少しずらして配置
+        offset = 20
+
+        if item_type == 'bubble':
+            new_bubble = copy.deepcopy(data)
+            new_bubble.x += offset
+            new_bubble.y += offset
+            import uuid
+            new_bubble.id = str(uuid.uuid4())
+            page.speech_bubbles.append(new_bubble)
+
+            # シーンを更新
+            from src.graphics.speech_bubble_item import SpeechBubbleGraphicsItem
+            item = SpeechBubbleGraphicsItem(new_bubble)
+            item.setZValue(200)
+            self._scene.addItem(item)
+
+        elif item_type == 'text':
+            new_text = copy.deepcopy(data)
+            new_text.x += offset
+            new_text.y += offset
+            import uuid
+            new_text.id = str(uuid.uuid4())
+            page.text_elements.append(new_text)
+
+            from src.graphics.text_item import TextGraphicsItem
+            item = TextGraphicsItem(new_text)
+            item.setZValue(200)
+            self._scene.addItem(item)
+
+        elif item_type == 'divider':
+            new_divider = copy.deepcopy(data)
+            new_divider.x1 += offset
+            new_divider.y1 += offset
+            new_divider.x2 += offset
+            new_divider.y2 += offset
+            import uuid
+            new_divider.id = str(uuid.uuid4())
+            page.divider_lines.append(new_divider)
+
+            from src.graphics.divider_line_item import DividerLineItem
+            item = DividerLineItem(new_divider)
+            item.setZValue(100)
+            self._scene.addItem(item)
+            self._scene.divider_changed.emit()
+
+        self._on_page_modified()
+        self._statusbar.showMessage("ペーストしました", 2000)
+
+    def closeEvent(self, event):
+        """ウィンドウを閉じる前の確認"""
+        if self._is_modified:
+            reply = QMessageBox.question(
+                self, "確認", "保存されていない変更があります。\n保存しますか？",
+                QMessageBox.StandardButton.Save |
+                QMessageBox.StandardButton.Discard |
+                QMessageBox.StandardButton.Cancel
+            )
+            if reply == QMessageBox.StandardButton.Save:
+                self._on_save()
+                if self._is_modified:  # 保存がキャンセルされた場合
+                    event.ignore()
+                    return
+            elif reply == QMessageBox.StandardButton.Cancel:
+                event.ignore()
+                return
+        event.accept()
 
     def _on_add_page(self):
         self._page_list._on_add_clicked()
