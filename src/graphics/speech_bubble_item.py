@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import QGraphicsItem, QGraphicsTextItem, QInputDialog
 from PyQt6.QtCore import Qt, QRectF, QPointF
-from PyQt6.QtGui import QPen, QBrush, QColor, QPainter, QFont, QFontMetrics
+from PyQt6.QtGui import QPen, QBrush, QColor, QPainter, QFont, QFontMetrics, QTextDocument, QTextOption
 
 from src.models.speech_bubble import SpeechBubble
 from src.graphics.bubble_shapes import BubbleShapes
@@ -59,8 +59,7 @@ class SpeechBubbleGraphicsItem(QGraphicsItem):
         if self.bubble.vertical:
             self._draw_vertical_text(painter, text_rect, self.bubble.text, font)
         else:
-            painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
-                             self.bubble.text)
+            self._draw_horizontal_text(painter, text_rect, self.bubble.text, font)
 
         if self.isSelected():
             self._draw_handles(painter, rect)
@@ -72,8 +71,9 @@ class SpeechBubbleGraphicsItem(QGraphicsItem):
 
         fm = QFontMetrics(font)
         char_height = fm.height()
-        char_width = fm.averageCharWidth()
-        line_spacing = char_width * 1.5  # 行間（縦書きでは横方向）
+        # 日本語文字は全角（正方形）なので、高さと同じ幅を使用
+        char_width = fm.height()
+        line_spacing = char_width * 1.2  # 行間（縦書きでは横方向）
 
         # 改行で分割
         lines = text.split('\n')
@@ -107,6 +107,33 @@ class SpeechBubbleGraphicsItem(QGraphicsItem):
                     # 通常の文字は中央に配置
                     char_rect = QRectF(x - char_width/2, y - char_height/2, char_width, char_height)
                     painter.drawText(char_rect, Qt.AlignmentFlag.AlignCenter, char)
+
+    def _draw_horizontal_text(self, painter: QPainter, rect: QRectF, text: str, font: QFont):
+        """横書きテキストを描画（クリッピングなし）"""
+        if not text:
+            return
+
+        doc = QTextDocument()
+        doc.setDefaultFont(font)
+        doc.setPlainText(text)
+        doc.setTextWidth(rect.width())
+
+        # テキストを中央揃えに設定
+        text_option = QTextOption(Qt.AlignmentFlag.AlignCenter)
+        text_option.setWrapMode(QTextOption.WrapMode.WordWrap)
+        doc.setDefaultTextOption(text_option)
+
+        # テキストのサイズを取得
+        doc_size = doc.size()
+
+        # 中央配置のための位置計算
+        x = rect.left() + (rect.width() - doc_size.width()) / 2
+        y = rect.top() + (rect.height() - doc_size.height()) / 2
+
+        painter.save()
+        painter.translate(x, y)
+        doc.drawContents(painter)
+        painter.restore()
 
     def _draw_handles(self, painter: QPainter, rect: QRectF):
         handles = self._get_handles(rect)
