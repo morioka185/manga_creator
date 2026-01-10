@@ -19,6 +19,13 @@ from src.services.export_service import ExportService
 from src.services.template_service import TemplateService
 from src.services.project_serializer import ProjectSerializer
 from src.utils.enums import ToolType
+from src.utils.constants import (
+    WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT, LEFT_PANEL_WIDTH, RIGHT_PANEL_WIDTH,
+    PANEL_MARGIN, PASTE_OFFSET, EXPORT_JPG_QUALITY,
+    ZVALUE_BUBBLE, ZVALUE_TEXT, ZVALUE_DIVIDER,
+    STATUSBAR_MESSAGE_TIMEOUT, STATUSBAR_MESSAGE_TIMEOUT_LONG,
+    PAGE_SIZE_MIN, PAGE_SIZE_MAX
+)
 from src.graphics.speech_bubble_item import SpeechBubbleGraphicsItem
 from src.graphics.text_item import TextGraphicsItem
 from src.graphics.divider_line_item import DividerLineItem
@@ -28,7 +35,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("漫画コマ割りエディタ")
-        self.setMinimumSize(1200, 800)
+        self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
 
         self._project = Project()
         self._current_page_index = 0
@@ -62,7 +69,7 @@ class MainWindow(QMainWindow):
 
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(5, 5, 5, 5)
+        left_layout.setContentsMargins(PANEL_MARGIN, PANEL_MARGIN, PANEL_MARGIN, PANEL_MARGIN)
 
         self._page_list = PageListWidget()
         self._page_list.set_project(self._project)
@@ -71,15 +78,16 @@ class MainWindow(QMainWindow):
         self._tool_panel = ToolPanel()
         left_layout.addWidget(self._tool_panel)
 
-        left_panel.setFixedWidth(150)
+        left_panel.setFixedWidth(LEFT_PANEL_WIDTH)
         splitter.addWidget(left_panel)
 
         self._scene = CanvasScene()
+        self._scene.set_undo_stack(self._undo_stack)
         self._canvas_view = CanvasView(self._scene)
         splitter.addWidget(self._canvas_view)
 
         self._property_panel = PropertyPanel()
-        self._property_panel.setFixedWidth(200)
+        self._property_panel.setFixedWidth(RIGHT_PANEL_WIDTH)
         splitter.addWidget(self._property_panel)
 
         splitter.setStretchFactor(0, 0)
@@ -230,6 +238,7 @@ class MainWindow(QMainWindow):
         self._scene.page_modified.connect(self._on_page_modified)
 
         self._property_panel.property_changed.connect(self._on_page_modified)
+        self._property_panel.page_margin_changed.connect(self._on_margin_changed)
 
     def _load_page(self, index: int):
         if index < 0 or index >= len(self._project.pages):
@@ -240,6 +249,7 @@ class MainWindow(QMainWindow):
 
         if index not in self._scenes:
             scene = CanvasScene()
+            scene.set_undo_stack(self._undo_stack)
             scene.set_page(page)
             scene.selectionChanged.connect(self._on_selection_changed)
             scene.page_modified.connect(self._on_page_modified)
@@ -249,6 +259,7 @@ class MainWindow(QMainWindow):
 
         self._scene = self._scenes[index]
         self._canvas_view.setScene(self._scene)
+        self._property_panel.set_page(page)
         self._update_statusbar()
 
     def _on_page_selected(self, index: int):
@@ -268,6 +279,11 @@ class MainWindow(QMainWindow):
         self._page_list.update_thumbnail(self._current_page_index)
         self._is_modified = True
         self._update_title()
+
+    def _on_margin_changed(self, margin):
+        """外枠幅変更時にシーンを再描画"""
+        page = self._project.pages[self._current_page_index]
+        self._scene.set_page(page)
 
     def _update_title(self):
         """ウィンドウタイトルを更新"""
@@ -352,7 +368,7 @@ class MainWindow(QMainWindow):
             self._current_file_path = filepath
             self._is_modified = False
             self._update_title()
-            self._statusbar.showMessage("保存しました", 3000)
+            self._statusbar.showMessage("保存しました", STATUSBAR_MESSAGE_TIMEOUT_LONG)
         else:
             QMessageBox.warning(self, "エラー", "保存に失敗しました。")
 
@@ -373,7 +389,7 @@ class MainWindow(QMainWindow):
             # 分割線をコピー
             self._clipboard = ('divider', copy.deepcopy(item.divider))
 
-        self._statusbar.showMessage("コピーしました", 2000)
+        self._statusbar.showMessage("コピーしました", STATUSBAR_MESSAGE_TIMEOUT)
 
     def _on_paste(self):
         """ペースト"""
@@ -383,13 +399,10 @@ class MainWindow(QMainWindow):
         item_type, data = self._clipboard
         page = self._project.pages[self._current_page_index]
 
-        # 少しずらして配置
-        offset = 20
-
         if item_type == 'bubble':
             new_bubble = copy.deepcopy(data)
-            new_bubble.x += offset
-            new_bubble.y += offset
+            new_bubble.x += PASTE_OFFSET
+            new_bubble.y += PASTE_OFFSET
             import uuid
             new_bubble.id = str(uuid.uuid4())
             page.speech_bubbles.append(new_bubble)
@@ -397,40 +410,40 @@ class MainWindow(QMainWindow):
             # シーンを更新
             from src.graphics.speech_bubble_item import SpeechBubbleGraphicsItem
             item = SpeechBubbleGraphicsItem(new_bubble)
-            item.setZValue(200)
+            item.setZValue(ZVALUE_BUBBLE)
             self._scene.addItem(item)
 
         elif item_type == 'text':
             new_text = copy.deepcopy(data)
-            new_text.x += offset
-            new_text.y += offset
+            new_text.x += PASTE_OFFSET
+            new_text.y += PASTE_OFFSET
             import uuid
             new_text.id = str(uuid.uuid4())
             page.text_elements.append(new_text)
 
             from src.graphics.text_item import TextGraphicsItem
             item = TextGraphicsItem(new_text)
-            item.setZValue(200)
+            item.setZValue(ZVALUE_TEXT)
             self._scene.addItem(item)
 
         elif item_type == 'divider':
             new_divider = copy.deepcopy(data)
-            new_divider.x1 += offset
-            new_divider.y1 += offset
-            new_divider.x2 += offset
-            new_divider.y2 += offset
+            new_divider.x1 += PASTE_OFFSET
+            new_divider.y1 += PASTE_OFFSET
+            new_divider.x2 += PASTE_OFFSET
+            new_divider.y2 += PASTE_OFFSET
             import uuid
             new_divider.id = str(uuid.uuid4())
             page.divider_lines.append(new_divider)
 
             from src.graphics.divider_line_item import DividerLineItem
             item = DividerLineItem(new_divider)
-            item.setZValue(100)
+            item.setZValue(ZVALUE_DIVIDER)
             self._scene.addItem(item)
             self._scene.divider_changed.emit()
 
         self._on_page_modified()
-        self._statusbar.showMessage("ペーストしました", 2000)
+        self._statusbar.showMessage("ペーストしました", STATUSBAR_MESSAGE_TIMEOUT)
 
     def closeEvent(self, event):
         """ウィンドウを閉じる前の確認"""
@@ -457,11 +470,11 @@ class MainWindow(QMainWindow):
     def _on_page_settings(self):
         page = self._project.pages[self._current_page_index]
 
-        width, ok = QInputDialog.getInt(self, "ページ設定", "幅:", page.width, 100, 5000)
+        width, ok = QInputDialog.getInt(self, "ページ設定", "幅:", page.width, PAGE_SIZE_MIN, PAGE_SIZE_MAX)
         if not ok:
             return
 
-        height, ok = QInputDialog.getInt(self, "ページ設定", "高さ:", page.height, 100, 5000)
+        height, ok = QInputDialog.getInt(self, "ページ設定", "高さ:", page.height, PAGE_SIZE_MIN, PAGE_SIZE_MAX)
         if not ok:
             return
 
@@ -488,7 +501,7 @@ class MainWindow(QMainWindow):
             self, "JPG出力", "", "JPEG Files (*.jpg)"
         )
         if filepath:
-            ExportService.export_page_to_image(self._scene, filepath, "JPG", quality=90)
+            ExportService.export_page_to_image(self._scene, filepath, "JPG", quality=EXPORT_JPG_QUALITY)
             QMessageBox.information(self, "完了", "JPGファイルを出力しました。")
 
     def _on_export_pdf(self):

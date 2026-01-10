@@ -2,6 +2,8 @@ from PyQt6.QtWidgets import QGraphicsView
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPainter
 
+from src.utils.constants import DEFAULT_ZOOM, MIN_ZOOM, MAX_ZOOM, ZOOM_FACTOR
+
 
 class CanvasView(QGraphicsView):
     def __init__(self, scene, parent=None):
@@ -14,7 +16,15 @@ class CanvasView(QGraphicsView):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
-        self._zoom = 1.0
+        self._zoom = DEFAULT_ZOOM
+        self._first_show = True
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._first_show:
+            self._first_show = False
+            # 初回表示時に画面にフィット
+            self.fit_to_view()
 
     def wheelEvent(self, event):
         if event.modifiers() == Qt.KeyboardModifier.ControlModifier:
@@ -27,17 +37,17 @@ class CanvasView(QGraphicsView):
             super().wheelEvent(event)
 
     def zoom_in(self):
-        if self._zoom < 5.0:
-            self._zoom *= 1.2
-            self.setTransform(self.transform().scale(1.2, 1.2))
+        if self._zoom < MAX_ZOOM:
+            self._zoom *= ZOOM_FACTOR
+            self.setTransform(self.transform().scale(ZOOM_FACTOR, ZOOM_FACTOR))
 
     def zoom_out(self):
-        if self._zoom > 0.2:
-            self._zoom /= 1.2
-            self.setTransform(self.transform().scale(1/1.2, 1/1.2))
+        if self._zoom > MIN_ZOOM:
+            self._zoom /= ZOOM_FACTOR
+            self.setTransform(self.transform().scale(1/ZOOM_FACTOR, 1/ZOOM_FACTOR))
 
     def reset_zoom(self):
-        self._zoom = 1.0
+        self._zoom = DEFAULT_ZOOM
         self.resetTransform()
 
     def fit_to_view(self):

@@ -3,6 +3,9 @@ from PyQt6.QtGui import QPainterPath, QPolygonF
 from PyQt6.QtCore import QPointF, QRectF
 
 from src.utils.enums import BubbleType
+from src.utils.constants import (
+    ROUNDED_RECT_RADIUS, CLOUD_BUMP_COUNT, EXPLOSION_SPIKE_COUNT
+)
 
 
 class BubbleShapes:
@@ -26,7 +29,7 @@ class BubbleShapes:
         return path
 
     @staticmethod
-    def create_rounded_rect(rect: QRectF, tail_pos: QPointF, radius: float = 15) -> QPainterPath:
+    def create_rounded_rect(rect: QRectF, tail_pos: QPointF, radius: float = ROUNDED_RECT_RADIUS) -> QPainterPath:
         path = QPainterPath()
         path.addRoundedRect(rect, radius, radius)
         path = BubbleShapes._add_tail(path, rect, tail_pos)
@@ -38,7 +41,7 @@ class BubbleShapes:
         cx, cy = rect.center().x(), rect.center().y()
         rx, ry = rect.width() / 2.5, rect.height() / 2.5
 
-        num_bumps = 10
+        num_bumps = CLOUD_BUMP_COUNT
         for i in range(num_bumps):
             angle = 2 * math.pi * i / num_bumps
             bump_x = cx + rx * math.cos(angle)
@@ -77,7 +80,7 @@ class BubbleShapes:
         cx, cy = rect.center().x(), rect.center().y()
         rx, ry = rect.width() / 2, rect.height() / 2
 
-        num_spikes = 16
+        num_spikes = EXPLOSION_SPIKE_COUNT
         points = []
         for i in range(num_spikes * 2):
             angle = math.pi * i / num_spikes - math.pi / 2

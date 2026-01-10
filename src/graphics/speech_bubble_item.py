@@ -4,7 +4,11 @@ from PyQt6.QtGui import QPen, QBrush, QColor, QPainter, QFont, QFontMetrics
 
 from src.models.speech_bubble import SpeechBubble
 from src.graphics.bubble_shapes import BubbleShapes
-from src.utils.constants import HANDLE_SIZE, MIN_PANEL_SIZE
+from src.utils.constants import (
+    HANDLE_SIZE, MIN_PANEL_SIZE, TAIL_HANDLE_SIZE,
+    BUBBLE_BOUNDING_MARGIN, BUBBLE_TEXT_PADDING, BUBBLE_BORDER_WIDTH,
+    COLOR_WHITE, COLOR_BLACK, COLOR_HANDLE, COLOR_HANDLE_BORDER, COLOR_ROTATION_HANDLE
+)
 
 
 class SpeechBubbleGraphicsItem(QGraphicsItem):
@@ -25,11 +29,12 @@ class SpeechBubbleGraphicsItem(QGraphicsItem):
         self._resizing = False
         self._resize_handle = None
         self._start_rect = None
-        self._start_pos = None
+        self._start_scene_pos = None
+        self._start_item_pos = None
         self._dragging_tail = False
 
     def boundingRect(self) -> QRectF:
-        margin = 20
+        margin = BUBBLE_BOUNDING_MARGIN
         return QRectF(-margin, -margin,
                       self.bubble.width + margin * 2,
                       self.bubble.height + margin * 2)
@@ -40,15 +45,16 @@ class SpeechBubbleGraphicsItem(QGraphicsItem):
 
         path = BubbleShapes.create_path(self.bubble.bubble_type, rect, tail_pos)
 
-        painter.setBrush(QBrush(QColor(255, 255, 255)))
-        painter.setPen(QPen(QColor(0, 0, 0), 2))
+        painter.setBrush(QBrush(QColor(*COLOR_WHITE)))
+        painter.setPen(QPen(QColor(*COLOR_BLACK), BUBBLE_BORDER_WIDTH))
         painter.drawPath(path)
 
         font = QFont(self.bubble.font_family, self.bubble.font_size)
         painter.setFont(font)
-        painter.setPen(QPen(QColor(0, 0, 0)))
+        painter.setPen(QPen(QColor(*COLOR_BLACK)))
 
-        text_rect = rect.adjusted(10, 10, -10, -10)
+        padding = BUBBLE_TEXT_PADDING
+        text_rect = rect.adjusted(padding, padding, -padding, -padding)
 
         if self.bubble.vertical:
             self._draw_vertical_text(painter, text_rect, self.bubble.text, font)
@@ -104,15 +110,15 @@ class SpeechBubbleGraphicsItem(QGraphicsItem):
 
     def _draw_handles(self, painter: QPainter, rect: QRectF):
         handles = self._get_handles(rect)
-        painter.setBrush(QBrush(QColor(100, 150, 255)))
-        painter.setPen(QPen(QColor(50, 100, 200)))
+        painter.setBrush(QBrush(QColor(*COLOR_HANDLE)))
+        painter.setPen(QPen(QColor(*COLOR_HANDLE_BORDER)))
         for handle_rect in handles.values():
             painter.drawRect(handle_rect)
 
         tail_pos = QPointF(self.bubble.tail_x, self.bubble.tail_y)
         if not tail_pos.isNull():
-            painter.setBrush(QBrush(QColor(255, 150, 100)))
-            painter.drawEllipse(tail_pos, 6, 6)
+            painter.setBrush(QBrush(QColor(*COLOR_ROTATION_HANDLE)))
+            painter.drawEllipse(tail_pos, TAIL_HANDLE_SIZE, TAIL_HANDLE_SIZE)
 
     def _get_handles(self, rect: QRectF) -> dict:
         s = HANDLE_SIZE
@@ -135,7 +141,7 @@ class SpeechBubbleGraphicsItem(QGraphicsItem):
 
     def _is_near_tail(self, pos) -> bool:
         tail_pos = QPointF(self.bubble.tail_x, self.bubble.tail_y)
-        return (pos - tail_pos).manhattanLength() < 12
+        return (pos - tail_pos).manhattanLength() < TAIL_HANDLE_SIZE * 2
 
     def hoverMoveEvent(self, event):
         handle = self._handle_at(event.pos())
@@ -157,7 +163,8 @@ class SpeechBubbleGraphicsItem(QGraphicsItem):
                 self._resizing = True
                 self._resize_handle = handle
                 self._start_rect = QRectF(0, 0, self.bubble.width, self.bubble.height)
-                self._start_pos = event.pos()
+                self._start_scene_pos = event.scenePos()
+                self._start_item_pos = self.pos()
                 return
         super().mousePressEvent(event)
 
@@ -168,7 +175,7 @@ class SpeechBubbleGraphicsItem(QGraphicsItem):
             self.update()
             return
         if self._resizing:
-            delta = event.pos() - self._start_pos
+            delta = event.scenePos() - self._start_scene_pos
             rect = QRectF(self._start_rect)
 
             if 'right' in self._resize_handle:
@@ -179,7 +186,7 @@ class SpeechBubbleGraphicsItem(QGraphicsItem):
                 new_w = rect.width() - delta.x()
                 if new_w >= MIN_PANEL_SIZE:
                     self.bubble.width = new_w
-                    self.setX(self.x() + delta.x())
+                    self.setX(self._start_item_pos.x() + delta.x())
             if 'bottom' in self._resize_handle:
                 new_h = rect.height() + delta.y()
                 if new_h >= MIN_PANEL_SIZE:
@@ -188,7 +195,7 @@ class SpeechBubbleGraphicsItem(QGraphicsItem):
                 new_h = rect.height() - delta.y()
                 if new_h >= MIN_PANEL_SIZE:
                     self.bubble.height = new_h
-                    self.setY(self.y() + delta.y())
+                    self.setY(self._start_item_pos.y() + delta.y())
 
             self.prepareGeometryChange()
             self.update()

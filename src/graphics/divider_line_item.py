@@ -3,7 +3,13 @@ from PyQt6.QtCore import Qt, QPointF, QLineF, QRectF
 from PyQt6.QtGui import QPen, QBrush, QColor, QPainter
 
 from src.models.divider_line import DividerLine
-from src.utils.constants import HANDLE_SIZE, SNAP_DISTANCE
+from src.utils.constants import (
+    HANDLE_SIZE, SNAP_DISTANCE,
+    COLOR_DIVIDER, COLOR_DIVIDER_SELECTED,
+    COLOR_HANDLE, COLOR_HANDLE_BORDER,
+    DIVIDER_LINE_WIDTH, DIVIDER_LINE_WIDTH_SELECTED,
+    DIVIDER_SNAP_RANGE
+)
 
 
 class DividerLineItem(QGraphicsLineItem):
@@ -21,17 +27,17 @@ class DividerLineItem(QGraphicsLineItem):
         self._update_pen()
 
     def _update_pen(self):
-        pen = QPen(QColor(255, 100, 100, 180))  # 薄い赤色
-        pen.setWidthF(1.0)  # 細い線
-        pen.setStyle(Qt.PenStyle.DashLine)  # 破線
+        pen = QPen(QColor(*COLOR_DIVIDER))
+        pen.setWidthF(DIVIDER_LINE_WIDTH)
+        pen.setStyle(Qt.PenStyle.DashLine)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         self.setPen(pen)
 
     def paint(self, painter: QPainter, option, widget=None):
         # 線を描画
         if self.isSelected():
-            pen = QPen(QColor(255, 50, 50))  # 選択時は濃い赤
-            pen.setWidthF(1.5)
+            pen = QPen(QColor(*COLOR_DIVIDER_SELECTED))
+            pen.setWidthF(DIVIDER_LINE_WIDTH_SELECTED)
             pen.setStyle(Qt.PenStyle.SolidLine)
             painter.setPen(pen)
         else:
@@ -44,8 +50,8 @@ class DividerLineItem(QGraphicsLineItem):
             self._draw_handles(painter)
 
     def _draw_handles(self, painter: QPainter):
-        painter.setBrush(QBrush(QColor(100, 150, 255)))
-        painter.setPen(QPen(QColor(50, 100, 200)))
+        painter.setBrush(QBrush(QColor(*COLOR_HANDLE)))
+        painter.setPen(QPen(QColor(*COLOR_HANDLE_BORDER)))
 
         s = HANDLE_SIZE
         line = self.line()
@@ -66,7 +72,7 @@ class DividerLineItem(QGraphicsLineItem):
         path.lineTo(self.line().p2())
 
         stroker = QPainterPathStroker()
-        stroker.setWidth(20)  # クリック可能な幅
+        stroker.setWidth(DIVIDER_SNAP_RANGE)
         return stroker.createStroke(path)
 
     def _handle_at(self, pos: QPointF) -> str:

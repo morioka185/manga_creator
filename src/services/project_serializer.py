@@ -8,6 +8,7 @@ from src.models.speech_bubble import SpeechBubble
 from src.models.text_element import TextElement
 from src.models.panel_image_data import PanelImageData
 from src.utils.enums import BubbleType
+from src.utils.constants import DEFAULT_MARGIN
 
 
 class ProjectSerializer:
@@ -32,6 +33,7 @@ class ProjectSerializer:
             "id": page.id,
             "width": page.width,
             "height": page.height,
+            "margin": page.margin,
             "divider_lines": [ProjectSerializer._serialize_divider(d) for d in page.divider_lines],
             "panel_images": {
                 panel_id: ProjectSerializer._serialize_panel_image(img_data)
@@ -118,6 +120,7 @@ class ProjectSerializer:
             id=data.get("id"),
             width=data.get("width", 1600),
             height=data.get("height", 2560),
+            margin=data.get("margin", DEFAULT_MARGIN),
             divider_lines=[],
             panel_images={},
             speech_bubbles=[],
@@ -150,7 +153,7 @@ class ProjectSerializer:
             y1=data.get("y1", 0),
             x2=data.get("x2", 100),
             y2=data.get("y2", 100),
-            gutter_width=data.get("gutter_width", 10.0)
+            gutter_width=data.get("gutter_width", DEFAULT_MARGIN)
         )
 
     @staticmethod

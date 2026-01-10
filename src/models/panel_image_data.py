@@ -1,11 +1,13 @@
 from dataclasses import dataclass
 
+from src.utils.constants import MIN_IMAGE_SCALE
+
 
 @dataclass
 class PanelImageData:
     """コマ内の画像データを管理するクラス"""
     image_path: str           # 画像ファイルパス
-    scale: float = 1.0        # 拡大率（1.0 = 最小フィット）
+    scale: float = MIN_IMAGE_SCALE  # 拡大率（1.0 = 最小フィット）
     offset_x: float = 0.0     # X方向オフセット（ピクセル）
     offset_y: float = 0.0     # Y方向オフセット（ピクセル）
 
@@ -23,7 +25,7 @@ class PanelImageData:
         """辞書から復元"""
         return cls(
             image_path=data['image_path'],
-            scale=data.get('scale', 1.0),
+            scale=data.get('scale', MIN_IMAGE_SCALE),
             offset_x=data.get('offset_x', 0.0),
             offset_y=data.get('offset_y', 0.0)
         )

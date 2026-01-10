@@ -3,6 +3,11 @@ from PyQt6.QtCore import QPointF, QLineF, QRectF, Qt
 from PyQt6.QtGui import QPolygonF
 
 from src.models.divider_line import DividerLine
+from src.utils.constants import (
+    POINT_TOLERANCE, LINE_TOLERANCE, BOUNDARY_MARGIN,
+    CELL_MARGIN, MERGE_MARGIN, EDGE_MARGIN,
+    EXTEND_LENGTH, MIN_LENGTH_THRESHOLD
+)
 
 
 class PanelCalculator:
@@ -10,21 +15,31 @@ class PanelCalculator:
 
     @staticmethod
     def calculate_panels(width: float, height: float,
-                         dividers: List[DividerLine]) -> List[QPolygonF]:
+                         dividers: List[DividerLine],
+                         margin: int = 0) -> List[QPolygonF]:
         """
         ページを分割線で区切り、各コマ領域をポリゴンとして返す
+        margin: 外枠の幅（コマ領域はこの内側に制限される）
         """
+        # マージンを考慮した有効領域
+        left = margin
+        top = margin
+        right = width - margin
+        bottom = height - margin
+        content_width = right - left
+        content_height = bottom - top
+
         if not dividers:
-            # 分割線がない場合はページ全体が1つのコマ
+            # 分割線がない場合はマージン内全体が1つのコマ
             return [QPolygonF([
-                QPointF(0, 0),
-                QPointF(width, 0),
-                QPointF(width, height),
-                QPointF(0, height)
+                QPointF(left, top),
+                QPointF(right, top),
+                QPointF(right, bottom),
+                QPointF(left, bottom)
             ])]
 
-        # ページの境界
-        page_rect = QRectF(0, 0, width, height)
+        # コンテンツ領域の境界
+        page_rect = QRectF(left, top, content_width, content_height)
 
         # 線分のリストを作成し、境界まで延長
         lines = []
@@ -67,9 +82,9 @@ class PanelCalculator:
 
             # 両端を延長
             p1 = PanelCalculator._extend_point(line.p1(), line.p2(), line.p1(),
-                                                boundaries + other_lines, rect)
+                                                boundaries + other_lines, rect, other_lines)
             p2 = PanelCalculator._extend_point(line.p2(), line.p1(), line.p2(),
-                                                boundaries + other_lines, rect)
+                                                boundaries + other_lines, rect, other_lines)
 
             extended.append(QLineF(p1, p2))
 
@@ -77,10 +92,11 @@ class PanelCalculator:
 
     @staticmethod
     def _extend_point(point: QPointF, other_point: QPointF, original: QPointF,
-                      obstacles: List[QLineF], rect: QRectF) -> QPointF:
+                      obstacles: List[QLineF], rect: QRectF,
+                      divider_lines: List[QLineF] = None) -> QPointF:
         """点を延長方向に、障害物にぶつかるまで延長"""
         # 端点が既に境界上にある場合は延長しない
-        margin = 5.0
+        margin = BOUNDARY_MARGIN
         on_boundary = (
             abs(point.x() - rect.left()) < margin or
             abs(point.x() - rect.right()) < margin or
@@ -90,12 +106,18 @@ class PanelCalculator:
         if on_boundary:
             return point
 
+        # 端点が他の分割線上にある場合も延長しない（T字接合）
+        if divider_lines:
+            for divider in divider_lines:
+                if PanelCalculator._point_near_segment(point, divider, LINE_TOLERANCE * 2):
+                    return point
+
         # 延長方向ベクトル
         dx = point.x() - other_point.x()
         dy = point.y() - other_point.y()
         length = (dx * dx + dy * dy) ** 0.5
 
-        if length < 0.001:
+        if length < MIN_LENGTH_THRESHOLD:
             return point
 
         # 単位ベクトル
@@ -103,7 +125,7 @@ class PanelCalculator:
         dy /= length
 
         # 非常に長い線を作成（延長方向に）
-        far_point = QPointF(point.x() + dx * 10000, point.y() + dy * 10000)
+        far_point = QPointF(point.x() + dx * EXTEND_LENGTH, point.y() + dy * EXTEND_LENGTH)
         extend_line = QLineF(point, far_point)
 
         # 最も近い交点を見つける
@@ -114,7 +136,7 @@ class PanelCalculator:
             intersection_type, intersect_point = extend_line.intersects(obstacle)
             if intersection_type == QLineF.IntersectionType.BoundedIntersection:
                 dist = (intersect_point.x() - point.x()) ** 2 + (intersect_point.y() - point.y()) ** 2
-                if dist > 0.1 and dist < closest_dist:  # 自分自身との交点を除く
+                if dist > POINT_TOLERANCE and dist < closest_dist:  # 自分自身との交点を除く
                     closest_dist = dist
                     closest_point = intersect_point
             elif intersection_type == QLineF.IntersectionType.UnboundedIntersection:
@@ -123,7 +145,7 @@ class PanelCalculator:
                 to_intersect_x = intersect_point.x() - point.x()
                 to_intersect_y = intersect_point.y() - point.y()
                 dot = to_intersect_x * dx + to_intersect_y * dy
-                if dot > 0.1:  # 延長方向にある
+                if dot > POINT_TOLERANCE:  # 延長方向にある
                     dist = to_intersect_x ** 2 + to_intersect_y ** 2
                     if dist < closest_dist:
                         # 障害物の線分上にあるかチェック
@@ -140,7 +162,7 @@ class PanelCalculator:
     @staticmethod
     def _point_on_segment(point: QPointF, segment: QLineF) -> bool:
         """点が線分上にあるかチェック"""
-        margin = 1.0
+        margin = LINE_TOLERANCE
         min_x = min(segment.p1().x(), segment.p2().x()) - margin
         max_x = max(segment.p1().x(), segment.p2().x()) + margin
         min_y = min(segment.p1().y(), segment.p2().y()) - margin
@@ -183,13 +205,22 @@ class PanelCalculator:
         シンプルな実装：グリッドベースのアプローチ
         """
         # 各線がページをどう分割するかを解析
-        # X座標とY座標で分割点を収集
-        x_coords = sorted(set([rect.left(), rect.right()] +
-                              [p.x() for p in points
-                               if rect.left() <= p.x() <= rect.right()]))
-        y_coords = sorted(set([rect.top(), rect.bottom()] +
-                              [p.y() for p in points
-                               if rect.top() <= p.y() <= rect.bottom()]))
+        # X座標とY座標で分割点を収集（浮動小数点誤差対策で丸める）
+        def round_coord(v):
+            return round(v, 1)
+
+        x_set = set([round_coord(rect.left()), round_coord(rect.right())])
+        y_set = set([round_coord(rect.top()), round_coord(rect.bottom())])
+
+        for p in points:
+            px, py = round_coord(p.x()), round_coord(p.y())
+            if rect.left() <= px <= rect.right():
+                x_set.add(px)
+            if rect.top() <= py <= rect.bottom():
+                y_set.add(py)
+
+        x_coords = sorted(x_set)
+        y_coords = sorted(y_set)
 
         panels = []
 
@@ -230,7 +261,7 @@ class PanelCalculator:
     def _line_crosses_rect(line: QLineF, rect: QRectF) -> bool:
         """線が矩形の内部を横切るかチェック（境界上は除く）"""
         # セルを少し縮小して内部のみをチェック
-        margin = 0.5
+        margin = CELL_MARGIN
         inner_rect = QRectF(
             rect.left() + margin, rect.top() + margin,
             rect.width() - margin * 2, rect.height() - margin * 2
@@ -307,7 +338,7 @@ class PanelCalculator:
     def _try_merge_rects(rect1: QRectF, rect2: QRectF,
                           lines: List[QLineF]) -> QRectF:
         """2つの矩形を結合できる場合は結合して返す"""
-        margin = 1.0
+        margin = MERGE_MARGIN
 
         # 水平方向に隣接（上下に並ぶ）
         if (abs(rect1.left() - rect2.left()) < margin and
@@ -350,7 +381,7 @@ class PanelCalculator:
     @staticmethod
     def _edge_has_divider(edge: QLineF, lines: List[QLineF]) -> bool:
         """辺上に分割線があるかチェック"""
-        edge_margin = 2.0
+        edge_margin = EDGE_MARGIN
 
         for line in lines:
             # 線が辺と重なっているかチェック
@@ -394,23 +425,23 @@ class PanelCalculator:
                 half_gutter = gutter / 2
 
                 # 水平線（Y座標で分割）
-                if abs(line.p1().y() - line.p2().y()) < 1:  # ほぼ水平
+                if abs(line.p1().y() - line.p2().y()) < LINE_TOLERANCE:  # ほぼ水平
                     line_y = (line.p1().y() + line.p2().y()) / 2
                     # コマの上辺がこの線に接している
-                    if abs(top - line_y) < 1:
+                    if abs(top - line_y) < LINE_TOLERANCE:
                         top += half_gutter
                     # コマの下辺がこの線に接している
-                    if abs(bottom - line_y) < 1:
+                    if abs(bottom - line_y) < LINE_TOLERANCE:
                         bottom -= half_gutter
 
                 # 垂直線（X座標で分割）
-                elif abs(line.p1().x() - line.p2().x()) < 1:  # ほぼ垂直
+                elif abs(line.p1().x() - line.p2().x()) < LINE_TOLERANCE:  # ほぼ垂直
                     line_x = (line.p1().x() + line.p2().x()) / 2
                     # コマの左辺がこの線に接している
-                    if abs(left - line_x) < 1:
+                    if abs(left - line_x) < LINE_TOLERANCE:
                         left += half_gutter
                     # コマの右辺がこの線に接している
-                    if abs(right - line_x) < 1:
+                    if abs(right - line_x) < LINE_TOLERANCE:
                         right -= half_gutter
 
                 # 斜め線の場合
@@ -426,7 +457,7 @@ class PanelCalculator:
 
                         # 点と線の距離を計算
                         dist = PanelCalculator._point_to_line_distance(corner, line)
-                        if dist < 1:
+                        if dist < LINE_TOLERANCE:
                             # この頂点は線上にある - 余白を適用
                             # 線に垂直な方向に移動
                             normal = PanelCalculator._line_normal(line)

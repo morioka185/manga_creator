@@ -12,14 +12,23 @@ from src.graphics.speech_bubble_item import SpeechBubbleGraphicsItem
 from src.graphics.text_item import TextGraphicsItem
 from src.services.panel_calculator import PanelCalculator
 from src.utils.enums import ToolType, BubbleType
+from src.utils.constants import (
+    MIN_IMAGE_SCALE, MAX_IMAGE_SCALE, IMAGE_SCALE_STEP,
+    COLOR_WHITE, COLOR_BLACK, COLOR_GRAY, COLOR_TEMP_LINE,
+    DEFAULT_PANEL_BORDER_WIDTH, BUBBLE_BORDER_WIDTH,
+    ZVALUE_BACKGROUND, ZVALUE_PANEL, ZVALUE_DIVIDER, ZVALUE_BUBBLE, ZVALUE_TEXT, ZVALUE_PAGE_BORDER,
+    DEFAULT_BUBBLE_WIDTH, DEFAULT_BUBBLE_HEIGHT, BUBBLE_TAIL_OFFSET, MIN_BUBBLE_DRAG_SIZE,
+    MIN_DIVIDER_LENGTH, DIVIDER_SNAP_RANGE
+)
+from src.commands.undo_commands import (
+    AddDividerCommand, DeleteDividerCommand,
+    AddBubbleCommand, DeleteBubbleCommand,
+    AddTextCommand, DeleteTextCommand
+)
 
 
 class PanelPolygonItem(QGraphicsPolygonItem):
     """コマ領域（ポリゴン）を表示するアイテム"""
-
-    MIN_SCALE = 1.0   # 最小スケール（コマを完全に覆う）
-    MAX_SCALE = 4.0   # 最大スケール（400%）
-    SCALE_STEP = 0.1  # スケール変更ステップ
 
     def __init__(self, polygon: QPolygonF, panel_id: str, parent=None):
         super().__init__(polygon, parent)
@@ -32,8 +41,8 @@ class PanelPolygonItem(QGraphicsPolygonItem):
         self._drag_start_pos = None
         self._drag_start_offset = None
 
-        self.setPen(QPen(QColor(0, 0, 0), 2))
-        self.setBrush(QBrush(QColor(255, 255, 255)))
+        self.setPen(QPen(QColor(*COLOR_BLACK), DEFAULT_PANEL_BORDER_WIDTH))
+        self.setBrush(QBrush(QColor(*COLOR_WHITE)))
         self.setFlag(QGraphicsPolygonItem.GraphicsItemFlag.ItemIsSelectable)
         self.setAcceptHoverEvents(True)
         self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton | Qt.MouseButton.RightButton)
@@ -178,10 +187,10 @@ class PanelPolygonItem(QGraphicsPolygonItem):
 
         if delta > 0:
             # 拡大
-            new_scale = min(self.MAX_SCALE, self._image_data.scale + self.SCALE_STEP)
+            new_scale = min(MAX_IMAGE_SCALE, self._image_data.scale + IMAGE_SCALE_STEP)
         else:
             # 縮小
-            new_scale = max(self.MIN_SCALE, self._image_data.scale - self.SCALE_STEP)
+            new_scale = max(MIN_IMAGE_SCALE, self._image_data.scale - IMAGE_SCALE_STEP)
 
         self._image_data.scale = new_scale
         self._clamp_offset()
@@ -309,8 +318,13 @@ class CanvasScene(QGraphicsScene):
         self._start_pos = None
         self._temp_line = None
         self._panel_items = []
+        self._undo_stack = None
 
         self.divider_changed.connect(self._on_divider_changed)
+
+    def set_undo_stack(self, undo_stack):
+        """UndoStackを設定"""
+        self._undo_stack = undo_stack
 
     def set_page(self, page: Page):
         self.clear()
@@ -319,11 +333,27 @@ class CanvasScene(QGraphicsScene):
 
         self.setSceneRect(0, 0, page.width, page.height)
 
-        # 背景
+        # 背景（ページ全体）
         bg_rect = self.addRect(0, 0, page.width, page.height,
-                               QPen(QColor(200, 200, 200)),
-                               QBrush(QColor(245, 245, 245)))
-        bg_rect.setZValue(-1000)
+                               QPen(QColor(*COLOR_GRAY)),
+                               QBrush(QColor(*COLOR_WHITE)))
+        bg_rect.setZValue(ZVALUE_BACKGROUND)
+
+        # ページ全体の外枠（黒い枠線）
+        page_border = self.addRect(0, 0, page.width, page.height,
+                                   QPen(QColor(*COLOR_BLACK), DEFAULT_PANEL_BORDER_WIDTH),
+                                   QBrush(Qt.BrushStyle.NoBrush))
+        page_border.setZValue(ZVALUE_PAGE_BORDER)
+
+        # 内側の枠（マージン内のコンテンツエリア）
+        margin = page.margin
+        if margin > 0:
+            inner_rect = self.addRect(margin, margin,
+                                      page.width - margin * 2,
+                                      page.height - margin * 2,
+                                      QPen(QColor(*COLOR_BLACK), 1),
+                                      QBrush(Qt.BrushStyle.NoBrush))
+            inner_rect.setZValue(ZVALUE_PAGE_BORDER)
 
         # コマ領域を計算して描画
         self._update_panels()
@@ -331,19 +361,19 @@ class CanvasScene(QGraphicsScene):
         # 分割線を描画
         for divider in page.divider_lines:
             item = DividerLineItem(divider)
-            item.setZValue(100)
+            item.setZValue(ZVALUE_DIVIDER)
             self.addItem(item)
 
         # 吹き出し
         for bubble in page.speech_bubbles:
             item = SpeechBubbleGraphicsItem(bubble)
-            item.setZValue(200)
+            item.setZValue(ZVALUE_BUBBLE)
             self.addItem(item)
 
         # テキスト
         for text_elem in page.text_elements:
             item = TextGraphicsItem(text_elem)
-            item.setZValue(200)
+            item.setZValue(ZVALUE_TEXT)
             self.addItem(item)
 
     def _update_panels(self):
@@ -356,17 +386,18 @@ class CanvasScene(QGraphicsScene):
         if not self._page:
             return
 
-        # コマ領域を計算
+        # コマ領域を計算（マージン内に制限）
         panels = PanelCalculator.calculate_panels(
             self._page.width, self._page.height,
-            self._page.divider_lines
+            self._page.divider_lines,
+            self._page.margin
         )
 
         # 各コマを描画
         for i, polygon in enumerate(panels):
             panel_id = f"panel_{i}"
             item = PanelPolygonItem(polygon, panel_id)
-            item.setZValue(0)
+            item.setZValue(ZVALUE_PANEL)
 
             # 保存された画像データがあれば適用
             if panel_id in self._page.panel_images:
@@ -424,7 +455,7 @@ class CanvasScene(QGraphicsScene):
             if self._current_tool == ToolType.PANEL:
                 self._temp_line = self.addLine(
                     QLineF(self._start_pos, self._start_pos),
-                    QPen(QColor(100, 100, 255), 2, Qt.PenStyle.DashLine)
+                    QPen(QColor(*COLOR_TEMP_LINE), BUBBLE_BORDER_WIDTH, Qt.PenStyle.DashLine)
                 )
 
     def mouseMoveEvent(self, event):
@@ -471,7 +502,7 @@ class CanvasScene(QGraphicsScene):
     def _create_divider(self, start: QPointF, end: QPointF):
         """分割線を作成（水平・垂直のみ）"""
         # 短すぎる線は無視
-        if (end - start).manhattanLength() < 30:
+        if (end - start).manhattanLength() < MIN_DIVIDER_LENGTH:
             return
 
         # 水平・垂直にスナップ
@@ -493,29 +524,48 @@ class CanvasScene(QGraphicsScene):
             x1=start.x(), y1=start.y(),
             x2=end.x(), y2=end.y()
         )
-        self._page.divider_lines.append(divider)
 
         item = DividerLineItem(divider)
-        item.setZValue(100)
-        self.addItem(item)
+        item.setZValue(ZVALUE_DIVIDER)
 
-        # コマ領域を再計算
-        self._update_panels()
+        # Undoコマンドを使用
+        if self._undo_stack is not None:
+            cmd = AddDividerCommand(self, divider, item)
+            self._undo_stack.push(cmd)
+        else:
+            self._page.divider_lines.append(divider)
+            self.addItem(item)
+            self._update_panels()
 
     def _snap_to_boundary(self, pos: QPointF) -> QPointF:
-        """ページ境界にスナップ"""
+        """マージン境界にスナップ"""
         x, y = pos.x(), pos.y()
-        snap = 20
+        snap = DIVIDER_SNAP_RANGE
+        margin = self._page.margin
 
-        if x < snap:
-            x = 0
-        elif x > self._page.width - snap:
-            x = self._page.width
+        # マージン境界
+        left = margin
+        top = margin
+        right = self._page.width - margin
+        bottom = self._page.height - margin
 
-        if y < snap:
-            y = 0
-        elif y > self._page.height - snap:
-            y = self._page.height
+        # 左端にスナップ
+        if x < left + snap:
+            x = left
+        # 右端にスナップ
+        elif x > right - snap:
+            x = right
+
+        # 上端にスナップ
+        if y < top + snap:
+            y = top
+        # 下端にスナップ
+        elif y > bottom - snap:
+            y = bottom
+
+        # マージン内に制限
+        x = max(left, min(right, x))
+        y = max(top, min(bottom, y))
 
         return QPointF(x, y)
 
@@ -525,44 +575,70 @@ class CanvasScene(QGraphicsScene):
         w = abs(end.x() - start.x())
         h = abs(end.y() - start.y())
 
-        if w < 20:
-            w = 150
-        if h < 20:
-            h = 100
+        if w < MIN_BUBBLE_DRAG_SIZE:
+            w = DEFAULT_BUBBLE_WIDTH
+        if h < MIN_BUBBLE_DRAG_SIZE:
+            h = DEFAULT_BUBBLE_HEIGHT
 
         bubble = SpeechBubble(
             x=x, y=y, width=w, height=h,
             bubble_type=self._current_bubble_type,
-            tail_x=w / 2, tail_y=h + 30
+            tail_x=w / 2, tail_y=h + BUBBLE_TAIL_OFFSET
         )
-        self._page.speech_bubbles.append(bubble)
 
         item = SpeechBubbleGraphicsItem(bubble)
-        item.setZValue(200)
-        self.addItem(item)
+        item.setZValue(ZVALUE_BUBBLE)
+
+        # Undoコマンドを使用
+        if self._undo_stack is not None:
+            cmd = AddBubbleCommand(self, bubble, item)
+            self._undo_stack.push(cmd)
+        else:
+            self._page.speech_bubbles.append(bubble)
+            self.addItem(item)
 
     def _create_text(self, pos):
         text_elem = TextElement(x=pos.x(), y=pos.y(), text="テキスト")
-        self._page.text_elements.append(text_elem)
 
         item = TextGraphicsItem(text_elem)
-        item.setZValue(200)
-        self.addItem(item)
+        item.setZValue(ZVALUE_TEXT)
+
+        # Undoコマンドを使用
+        if self._undo_stack is not None:
+            cmd = AddTextCommand(self, text_elem, item)
+            self._undo_stack.push(cmd)
+        else:
+            self._page.text_elements.append(text_elem)
+            self.addItem(item)
         item.setSelected(True)
 
     def delete_selected(self):
         for item in self.selectedItems():
             if isinstance(item, DividerLineItem):
-                if item.divider in self._page.divider_lines:
-                    self._page.divider_lines.remove(item.divider)
-                self.removeItem(item)
-                self._update_panels()
+                if self._undo_stack is not None:
+                    cmd = DeleteDividerCommand(self, item.divider, item)
+                    self._undo_stack.push(cmd)
+                else:
+                    if item.divider in self._page.divider_lines:
+                        self._page.divider_lines.remove(item.divider)
+                    self.removeItem(item)
+                    self._update_panels()
+                    self.page_modified.emit()
             elif isinstance(item, SpeechBubbleGraphicsItem):
-                if item.bubble in self._page.speech_bubbles:
-                    self._page.speech_bubbles.remove(item.bubble)
-                self.removeItem(item)
+                if self._undo_stack is not None:
+                    cmd = DeleteBubbleCommand(self, item.bubble, item)
+                    self._undo_stack.push(cmd)
+                else:
+                    if item.bubble in self._page.speech_bubbles:
+                        self._page.speech_bubbles.remove(item.bubble)
+                    self.removeItem(item)
+                    self.page_modified.emit()
             elif isinstance(item, TextGraphicsItem):
-                if item.text_element in self._page.text_elements:
-                    self._page.text_elements.remove(item.text_element)
-                self.removeItem(item)
-        self.page_modified.emit()
+                if self._undo_stack is not None:
+                    cmd = DeleteTextCommand(self, item.text_element, item)
+                    self._undo_stack.push(cmd)
+                else:
+                    if item.text_element in self._page.text_elements:
+                        self._page.text_elements.remove(item.text_element)
+                    self.removeItem(item)
+                    self.page_modified.emit()

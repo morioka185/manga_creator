@@ -1,16 +1,14 @@
 from PyQt6.QtWidgets import QGraphicsScene
-from PyQt6.QtCore import Qt, QRectF
 from PyQt6.QtGui import QImage, QPainter, QColor
 
-from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas as pdf_canvas
 from reportlab.lib.utils import ImageReader
 from PIL import Image
 import io
-import os
 
 from src.models.project import Project
 from src.graphics.divider_line_item import DividerLineItem
+from src.utils.constants import COLOR_WHITE
 
 
 class ExportService:
@@ -32,24 +30,22 @@ class ExportService:
 
     @staticmethod
     def export_page_to_image(scene: QGraphicsScene, filepath: str,
-                              format: str = "PNG", quality: int = 95, dpi: int = 300):
+                              format: str = "PNG", quality: int = 95):
         # 分割線を一時的に非表示
         divider_states = ExportService._hide_dividers(scene)
 
         rect = scene.sceneRect()
-        scale = dpi / 72.0
 
         image = QImage(
-            int(rect.width() * scale),
-            int(rect.height() * scale),
+            int(rect.width()),
+            int(rect.height()),
             QImage.Format.Format_ARGB32
         )
-        image.fill(QColor(255, 255, 255))
+        image.fill(QColor(*COLOR_WHITE))
 
         painter = QPainter(image)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        painter.scale(scale, scale)
         scene.render(painter)
         painter.end()
 
@@ -62,7 +58,7 @@ class ExportService:
             image.save(filepath, format.upper())
 
     @staticmethod
-    def export_project_to_pdf(project: Project, scenes: list, filepath: str, dpi: int = 150):
+    def export_project_to_pdf(project: Project, scenes: list, filepath: str):
         if not scenes:
             return
 
@@ -81,19 +77,17 @@ class ExportService:
             divider_states = ExportService._hide_dividers(scene)
 
             rect = scene.sceneRect()
-            scale = dpi / 72.0
 
             image = QImage(
-                int(rect.width() * scale),
-                int(rect.height() * scale),
+                int(rect.width()),
+                int(rect.height()),
                 QImage.Format.Format_RGB32
             )
-            image.fill(QColor(255, 255, 255))
+            image.fill(QColor(*COLOR_WHITE))
 
             painter = QPainter(image)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-            painter.scale(scale, scale)
             scene.render(painter)
             painter.end()
 
@@ -114,21 +108,19 @@ class ExportService:
         c.save()
 
     @staticmethod
-    def scene_to_qimage(scene: QGraphicsScene, dpi: int = 150) -> QImage:
+    def scene_to_qimage(scene: QGraphicsScene) -> QImage:
         rect = scene.sceneRect()
-        scale = dpi / 72.0
 
         image = QImage(
-            int(rect.width() * scale),
-            int(rect.height() * scale),
+            int(rect.width()),
+            int(rect.height()),
             QImage.Format.Format_ARGB32
         )
-        image.fill(QColor(255, 255, 255))
+        image.fill(QColor(*COLOR_WHITE))
 
         painter = QPainter(image)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        painter.scale(scale, scale)
         scene.render(painter)
         painter.end()
 

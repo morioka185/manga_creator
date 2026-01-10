@@ -5,6 +5,11 @@ from PyQt6.QtGui import QPixmap, QImage, QPainter, QColor, QIcon
 
 from src.models.project import Project
 from src.models.page import Page
+from src.utils.constants import (
+    PANEL_MARGIN, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, THUMBNAIL_SPACING,
+    COLOR_WHITE, COLOR_GRAY, COLOR_BLACK,
+    DEFAULT_PAGE_WIDTH, DEFAULT_PAGE_HEIGHT
+)
 
 
 class PageListWidget(QWidget):
@@ -19,11 +24,11 @@ class PageListWidget(QWidget):
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setContentsMargins(PANEL_MARGIN, PANEL_MARGIN, PANEL_MARGIN, PANEL_MARGIN)
 
         self._list = QListWidget()
-        self._list.setIconSize(QSize(80, 120))
-        self._list.setSpacing(5)
+        self._list.setIconSize(QSize(THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT))
+        self._list.setSpacing(THUMBNAIL_SPACING)
         self._list.currentRowChanged.connect(self._on_row_changed)
         self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._list.customContextMenuRequested.connect(self._show_context_menu)
@@ -54,18 +59,18 @@ class PageListWidget(QWidget):
             self._list.setCurrentRow(0)
 
     def _create_thumbnail(self, page: Page) -> QPixmap:
-        thumb_w, thumb_h = 80, 120
+        thumb_w, thumb_h = THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT
         img = QImage(thumb_w, thumb_h, QImage.Format.Format_RGB32)
-        img.fill(QColor(255, 255, 255))
+        img.fill(QColor(*COLOR_WHITE))
 
         painter = QPainter(img)
-        painter.setPen(QColor(200, 200, 200))
+        painter.setPen(QColor(*COLOR_GRAY))
         painter.drawRect(0, 0, thumb_w - 1, thumb_h - 1)
 
         scale_x = thumb_w / page.width
         scale_y = thumb_h / page.height
 
-        painter.setPen(QColor(0, 0, 0))
+        painter.setPen(QColor(*COLOR_BLACK))
         # 分割線を描画
         for divider in page.divider_lines:
             x1 = int(divider.x1 * scale_x)
@@ -84,8 +89,8 @@ class PageListWidget(QWidget):
     def _on_add_clicked(self):
         if self._project:
             self._project.pages.append(Page(
-                width=self._project.pages[0].width if self._project.pages else 800,
-                height=self._project.pages[0].height if self._project.pages else 1200
+                width=self._project.pages[0].width if self._project.pages else DEFAULT_PAGE_WIDTH,
+                height=self._project.pages[0].height if self._project.pages else DEFAULT_PAGE_HEIGHT
             ))
             self._refresh_list()
             self._list.setCurrentRow(len(self._project.pages) - 1)

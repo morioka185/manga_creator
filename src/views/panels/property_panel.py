@@ -1,41 +1,67 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QSpinBox,
                                QHBoxLayout, QGroupBox, QPushButton,
                                QFontComboBox, QColorDialog, QFrame,
-                               QDoubleSpinBox, QFileDialog, QCheckBox)
+                               QDoubleSpinBox, QFileDialog, QCheckBox,
+                               QPlainTextEdit)
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QColor
 
 from src.graphics.speech_bubble_item import SpeechBubbleGraphicsItem
 from src.graphics.text_item import TextGraphicsItem
 from src.graphics.divider_line_item import DividerLineItem
+from src.utils.constants import (
+    DEFAULT_MARGIN, PANEL_MARGIN,
+    SPINBOX_POSITION_MIN, SPINBOX_POSITION_MAX,
+    SPINBOX_SIZE_MIN, SPINBOX_SIZE_MAX,
+    SPINBOX_MARGIN_MAX, SPINBOX_GUTTER_MAX, SPINBOX_GUTTER_STEP,
+    SPINBOX_ROTATION_MIN, SPINBOX_ROTATION_MAX,
+    MIN_IMAGE_SCALE, MAX_IMAGE_SCALE, IMAGE_SCALE_STEP,
+    MIN_FONT_SIZE, MAX_FONT_SIZE, DEFAULT_FONT_SIZE
+)
 
 
 class PropertyPanel(QWidget):
     property_changed = pyqtSignal()
+    page_margin_changed = pyqtSignal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._current_item = None
+        self._current_page = None
         self._setup_ui()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setContentsMargins(PANEL_MARGIN, PANEL_MARGIN, PANEL_MARGIN, PANEL_MARGIN)
 
         title = QLabel("プロパティ")
         title.setStyleSheet("font-weight: bold;")
         layout.addWidget(title)
 
+        # ページ設定グループ
+        self._page_group = QGroupBox("ページ設定")
+        page_layout = QVBoxLayout(self._page_group)
+        margin_row = QHBoxLayout()
+        margin_row.addWidget(QLabel("外枠幅:"))
+        self._margin_spin = QSpinBox()
+        self._margin_spin.setRange(0, SPINBOX_MARGIN_MAX)
+        self._margin_spin.setValue(DEFAULT_MARGIN)
+        self._margin_spin.setSuffix(" px")
+        self._margin_spin.valueChanged.connect(self._on_margin_changed)
+        margin_row.addWidget(self._margin_spin)
+        page_layout.addLayout(margin_row)
+        layout.addWidget(self._page_group)
+
         pos_group = QGroupBox("位置")
         pos_layout = QHBoxLayout(pos_group)
         pos_layout.addWidget(QLabel("X:"))
         self._x_spin = QSpinBox()
-        self._x_spin.setRange(-10000, 10000)
+        self._x_spin.setRange(SPINBOX_POSITION_MIN, SPINBOX_POSITION_MAX)
         self._x_spin.valueChanged.connect(self._on_position_changed)
         pos_layout.addWidget(self._x_spin)
         pos_layout.addWidget(QLabel("Y:"))
         self._y_spin = QSpinBox()
-        self._y_spin.setRange(-10000, 10000)
+        self._y_spin.setRange(SPINBOX_POSITION_MIN, SPINBOX_POSITION_MAX)
         self._y_spin.valueChanged.connect(self._on_position_changed)
         pos_layout.addWidget(self._y_spin)
         layout.addWidget(pos_group)
@@ -44,12 +70,12 @@ class PropertyPanel(QWidget):
         size_layout = QHBoxLayout(size_group)
         size_layout.addWidget(QLabel("W:"))
         self._w_spin = QSpinBox()
-        self._w_spin.setRange(10, 10000)
+        self._w_spin.setRange(SPINBOX_SIZE_MIN, SPINBOX_SIZE_MAX)
         self._w_spin.valueChanged.connect(self._on_size_changed)
         size_layout.addWidget(self._w_spin)
         size_layout.addWidget(QLabel("H:"))
         self._h_spin = QSpinBox()
-        self._h_spin.setRange(10, 10000)
+        self._h_spin.setRange(SPINBOX_SIZE_MIN, SPINBOX_SIZE_MAX)
         self._h_spin.valueChanged.connect(self._on_size_changed)
         size_layout.addWidget(self._h_spin)
         layout.addWidget(size_group)
@@ -58,7 +84,7 @@ class PropertyPanel(QWidget):
         rot_layout = QHBoxLayout(self._rotation_group)
         rot_layout.addWidget(QLabel("角度:"))
         self._rotation_spin = QSpinBox()
-        self._rotation_spin.setRange(-180, 180)
+        self._rotation_spin.setRange(SPINBOX_ROTATION_MIN, SPINBOX_ROTATION_MAX)
         self._rotation_spin.setSuffix("°")
         self._rotation_spin.valueChanged.connect(self._on_rotation_changed)
         rot_layout.addWidget(self._rotation_spin)
@@ -79,9 +105,9 @@ class PropertyPanel(QWidget):
         scale_row = QHBoxLayout()
         scale_row.addWidget(QLabel("拡大率:"))
         self._scale_spin = QDoubleSpinBox()
-        self._scale_spin.setRange(1.0, 4.0)
-        self._scale_spin.setSingleStep(0.1)
-        self._scale_spin.setValue(1.0)
+        self._scale_spin.setRange(MIN_IMAGE_SCALE, MAX_IMAGE_SCALE)
+        self._scale_spin.setSingleStep(IMAGE_SCALE_STEP)
+        self._scale_spin.setValue(MIN_IMAGE_SCALE)
         self._scale_spin.valueChanged.connect(self._on_scale_changed)
         scale_row.addWidget(self._scale_spin)
         image_layout.addLayout(scale_row)
@@ -103,9 +129,9 @@ class PropertyPanel(QWidget):
         width_row = QHBoxLayout()
         width_row.addWidget(QLabel("間白幅:"))
         self._gutter_spin = QDoubleSpinBox()
-        self._gutter_spin.setRange(0, 100.0)
-        self._gutter_spin.setSingleStep(2.0)
-        self._gutter_spin.setValue(10.0)
+        self._gutter_spin.setRange(0, SPINBOX_GUTTER_MAX)
+        self._gutter_spin.setSingleStep(SPINBOX_GUTTER_STEP)
+        self._gutter_spin.setValue(DEFAULT_MARGIN)
         self._gutter_spin.setSuffix(" px")
         self._gutter_spin.valueChanged.connect(self._on_gutter_changed)
         width_row.addWidget(self._gutter_spin)
@@ -122,8 +148,8 @@ class PropertyPanel(QWidget):
         size_row = QHBoxLayout()
         size_row.addWidget(QLabel("サイズ:"))
         self._font_size_spin = QSpinBox()
-        self._font_size_spin.setRange(6, 200)
-        self._font_size_spin.setValue(14)
+        self._font_size_spin.setRange(MIN_FONT_SIZE, MAX_FONT_SIZE)
+        self._font_size_spin.setValue(DEFAULT_FONT_SIZE)
         self._font_size_spin.valueChanged.connect(self._on_font_size_changed)
         size_row.addWidget(self._font_size_spin)
         font_layout.addLayout(size_row)
@@ -141,7 +167,25 @@ class PropertyPanel(QWidget):
         layout.addWidget(self._font_group)
         self._font_group.hide()
 
+        # テキスト内容グループ
+        self._content_group = QGroupBox("テキスト内容")
+        content_layout = QVBoxLayout(self._content_group)
+        self._content_edit = QPlainTextEdit()
+        self._content_edit.setMaximumHeight(100)
+        self._content_edit.setPlaceholderText("テキストを入力...")
+        self._content_edit.textChanged.connect(self._on_content_changed)
+        content_layout.addWidget(self._content_edit)
+        layout.addWidget(self._content_group)
+        self._content_group.hide()
+
         layout.addStretch()
+
+    def set_page(self, page):
+        self._current_page = page
+        if page:
+            self._margin_spin.blockSignals(True)
+            self._margin_spin.setValue(page.margin)
+            self._margin_spin.blockSignals(False)
 
     def set_selected_item(self, item):
         self._current_item = item
@@ -152,6 +196,7 @@ class PropertyPanel(QWidget):
         self._font_group.hide()
         self._rotation_group.hide()
         self._line_group.hide()
+        self._content_group.hide()
 
         if not self._current_item:
             return
@@ -180,7 +225,7 @@ class PropertyPanel(QWidget):
                 self._reset_btn.setEnabled(True)
                 self._clear_btn.setEnabled(True)
             else:
-                self._scale_spin.setValue(1.0)
+                self._scale_spin.setValue(MIN_IMAGE_SCALE)
                 self._scale_spin.setEnabled(False)
                 self._reset_btn.setEnabled(False)
                 self._clear_btn.setEnabled(False)
@@ -207,14 +252,24 @@ class PropertyPanel(QWidget):
             self._vertical_check.setChecked(bubble.vertical)
             self._vertical_check.blockSignals(False)
             self._vertical_check.show()
+            # テキスト内容
+            self._content_edit.blockSignals(True)
+            self._content_edit.setPlainText(bubble.text)
+            self._content_edit.blockSignals(False)
             self._font_group.show()
+            self._content_group.show()
 
         elif isinstance(self._current_item, TextGraphicsItem):
             text_elem = self._current_item.text_element
             self._x_spin.setValue(int(text_elem.x))
             self._y_spin.setValue(int(text_elem.y))
             self._vertical_check.hide()  # テキスト要素には縦書き設定なし
+            # テキスト内容
+            self._content_edit.blockSignals(True)
+            self._content_edit.setPlainText(self._current_item.toPlainText())
+            self._content_edit.blockSignals(False)
             self._font_group.show()
+            self._content_group.show()
 
         self._x_spin.blockSignals(False)
         self._y_spin.blockSignals(False)
@@ -287,13 +342,13 @@ class PropertyPanel(QWidget):
         if self._current_item.__class__.__name__ == 'PanelPolygonItem':
             image_data = self._current_item.get_image_data()
             if image_data:
-                image_data.scale = 1.0
+                image_data.scale = MIN_IMAGE_SCALE
                 image_data.offset_x = 0.0
                 image_data.offset_y = 0.0
                 self._current_item.update()
                 # スケールスピンボックスを更新
                 self._scale_spin.blockSignals(True)
-                self._scale_spin.setValue(1.0)
+                self._scale_spin.setValue(MIN_IMAGE_SCALE)
                 self._scale_spin.blockSignals(False)
                 # シーンに保存
                 if self._current_item.scene():
@@ -344,4 +399,25 @@ class PropertyPanel(QWidget):
         if isinstance(self._current_item, SpeechBubbleGraphicsItem):
             self._current_item.bubble.vertical = (state == Qt.CheckState.Checked.value)
             self._current_item.update()
+            self.property_changed.emit()
+
+    def _on_margin_changed(self, margin):
+        """外枠幅変更"""
+        if self._current_page:
+            self._current_page.margin = margin
+            self.page_margin_changed.emit(margin)
+            self.property_changed.emit()
+
+    def _on_content_changed(self):
+        """テキスト内容変更"""
+        if not self._current_item:
+            return
+        text = self._content_edit.toPlainText()
+        if isinstance(self._current_item, SpeechBubbleGraphicsItem):
+            self._current_item.bubble.text = text
+            self._current_item.update()
+            self.property_changed.emit()
+        elif isinstance(self._current_item, TextGraphicsItem):
+            self._current_item.setPlainText(text)
+            self._current_item.text_element.text = text
             self.property_changed.emit()
