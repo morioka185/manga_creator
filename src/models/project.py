@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import List
 
 from src.models.page import Page
+from src.services.settings_service import SettingsService
 
 
 @dataclass
@@ -11,4 +12,9 @@ class Project:
 
     def __post_init__(self):
         if not self.pages:
-            self.pages.append(Page())
+            settings = SettingsService.get_instance()
+            self.pages.append(Page(
+                width=settings.page_width,
+                height=settings.page_height,
+                margin=settings.page_margin
+            ))

@@ -29,6 +29,8 @@ from src.utils.constants import (
 from src.graphics.speech_bubble_item import SpeechBubbleGraphicsItem
 from src.graphics.text_item import TextGraphicsItem
 from src.graphics.divider_line_item import DividerLineItem
+from src.views.dialogs.settings_dialog import SettingsDialog
+from src.services.settings_service import SettingsService
 
 
 class MainWindow(QMainWindow):
@@ -129,14 +131,17 @@ class MainWindow(QMainWindow):
         export_menu = file_menu.addMenu("エクスポート")
 
         export_png = QAction("PNG出力...", self)
+        export_png.setShortcut(QKeySequence("Ctrl+Shift+E"))
         export_png.triggered.connect(self._on_export_png)
         export_menu.addAction(export_png)
 
         export_jpg = QAction("JPG出力...", self)
+        export_jpg.setShortcut(QKeySequence("Ctrl+Shift+J"))
         export_jpg.triggered.connect(self._on_export_jpg)
         export_menu.addAction(export_jpg)
 
         export_pdf = QAction("PDF出力（全ページ）...", self)
+        export_pdf.setShortcut(QKeySequence("Ctrl+Shift+P"))
         export_pdf.triggered.connect(self._on_export_pdf)
         export_menu.addAction(export_pdf)
 
@@ -197,9 +202,33 @@ class MainWindow(QMainWindow):
         fit_view.triggered.connect(self._canvas_view.fit_to_view)
         view_menu.addAction(fit_view)
 
-        page_menu = menubar.addMenu("ページ(&P)")
+        # ===== ツールメニュー =====
+        tool_menu = menubar.addMenu("ツール(&T)")
+
+        select_tool_action = QAction("選択ツール(&S)", self)
+        select_tool_action.setShortcut(QKeySequence("V"))
+        select_tool_action.triggered.connect(lambda: self._tool_panel.set_tool(ToolType.SELECT))
+        tool_menu.addAction(select_tool_action)
+
+        panel_tool_action = QAction("分割線ツール(&P)", self)
+        panel_tool_action.setShortcut(QKeySequence("P"))
+        panel_tool_action.triggered.connect(lambda: self._tool_panel.set_tool(ToolType.PANEL))
+        tool_menu.addAction(panel_tool_action)
+
+        bubble_tool_action = QAction("吹き出しツール(&B)", self)
+        bubble_tool_action.setShortcut(QKeySequence("B"))
+        bubble_tool_action.triggered.connect(lambda: self._tool_panel.set_tool(ToolType.SPEECH_BUBBLE))
+        tool_menu.addAction(bubble_tool_action)
+
+        text_tool_action = QAction("テキストツール(&T)", self)
+        text_tool_action.setShortcut(QKeySequence("T"))
+        text_tool_action.triggered.connect(lambda: self._tool_panel.set_tool(ToolType.TEXT))
+        tool_menu.addAction(text_tool_action)
+
+        page_menu = menubar.addMenu("ページ(&G)")
 
         add_page = QAction("ページ追加(&A)", self)
+        add_page.setShortcut(QKeySequence("Ctrl+Shift+N"))
         add_page.triggered.connect(self._on_add_page)
         page_menu.addAction(add_page)
 
@@ -207,19 +236,71 @@ class MainWindow(QMainWindow):
         page_settings.triggered.connect(self._on_page_settings)
         page_menu.addAction(page_settings)
 
-    def _setup_toolbar(self):
-        toolbar = QToolBar()
-        toolbar.setMovable(False)
-        self.addToolBar(toolbar)
+        # ===== スタイルメニュー =====
+        self._style_menu = menubar.addMenu("スタイル(&S)")
+        self._update_style_menu()
 
-        toolbar.addAction("新規", self._on_new)
-        toolbar.addAction("開く", self._on_open)
-        toolbar.addAction("保存", self._on_save)
-        toolbar.addSeparator()
-        toolbar.addAction("+ ページ", self._on_add_page)
-        toolbar.addSeparator()
-        toolbar.addAction("PNG", self._on_export_png)
-        toolbar.addAction("PDF", self._on_export_pdf)
+        # ===== 設定メニュー =====
+        settings_menu = menubar.addMenu("設定(&O)")
+
+        settings_action = QAction("設定...", self)
+        settings_action.setShortcut(QKeySequence("Ctrl+,"))
+        settings_action.triggered.connect(self._on_settings)
+        settings_menu.addAction(settings_action)
+
+    def _update_style_menu(self):
+        """スタイルメニューを更新"""
+        self._style_menu.clear()
+        settings = SettingsService.get_instance()
+
+        for i, style in enumerate(settings.get_font_styles()):
+            action = QAction(style.name, self)
+            # 数字キーでショートカット (1-9)
+            if i < 9:
+                action.setShortcut(QKeySequence(str(i + 1)))
+            action.triggered.connect(lambda checked, s=style: self._apply_style(s))
+            self._style_menu.addAction(action)
+
+        self._style_menu.addSeparator()
+        edit_action = QAction("スタイルを編集...", self)
+        edit_action.triggered.connect(self._on_settings)
+        self._style_menu.addAction(edit_action)
+
+    def _apply_style(self, style):
+        """選択中のアイテムにスタイルを適用"""
+        items = self._scene.selectedItems()
+        if not items:
+            self._statusbar.showMessage("アイテムを選択してください", STATUSBAR_MESSAGE_TIMEOUT)
+            return
+
+        for item in items:
+            if isinstance(item, SpeechBubbleGraphicsItem):
+                item.bubble.font_family = style.font_family
+                item.bubble.font_size = style.font_size
+                item.update()
+            elif isinstance(item, TextGraphicsItem):
+                from PyQt6.QtGui import QFont
+                font = QFont(style.font_family, style.font_size)
+                font.setBold(style.bold)
+                item.setFont(font)
+                item.text_element.font_family = style.font_family
+                item.text_element.font_size = style.font_size
+
+        # プロパティパネルのUIを更新
+        if items:
+            self._property_panel.set_selected_item(items[0])
+
+        self._on_page_modified()
+        self._statusbar.showMessage(f"スタイル「{style.name}」を適用しました", STATUSBAR_MESSAGE_TIMEOUT)
+
+    def _on_settings(self):
+        """設定ダイアログを開く"""
+        dialog = SettingsDialog(self)
+        if dialog.exec():
+            self._update_style_menu()
+
+    def _setup_toolbar(self):
+        pass  # ツールバーは不要（メニューとショートカットで対応）
 
     def _setup_statusbar(self):
         self._statusbar = QStatusBar()

@@ -25,6 +25,7 @@ from src.commands.undo_commands import (
     AddBubbleCommand, DeleteBubbleCommand,
     AddTextCommand, DeleteTextCommand
 )
+from src.services.settings_service import SettingsService
 
 
 class PanelPolygonItem(QGraphicsPolygonItem):
@@ -572,18 +573,23 @@ class CanvasScene(QGraphicsScene):
     def _create_bubble(self, start, end):
         x = min(start.x(), end.x())
         y = min(start.y(), end.y())
+        settings = SettingsService.get_instance()
+
         w = abs(end.x() - start.x())
         h = abs(end.y() - start.y())
 
         if w < MIN_BUBBLE_DRAG_SIZE:
-            w = DEFAULT_BUBBLE_WIDTH
+            w = settings.bubble_width
         if h < MIN_BUBBLE_DRAG_SIZE:
-            h = DEFAULT_BUBBLE_HEIGHT
+            h = settings.bubble_height
 
         bubble = SpeechBubble(
             x=x, y=y, width=w, height=h,
             bubble_type=self._current_bubble_type,
-            tail_x=w / 2, tail_y=h + BUBBLE_TAIL_OFFSET
+            tail_x=w / 2, tail_y=h + BUBBLE_TAIL_OFFSET,
+            font_family=settings.font_family,
+            font_size=settings.font_size,
+            vertical=settings.bubble_vertical
         )
 
         item = SpeechBubbleGraphicsItem(bubble)
@@ -598,7 +604,12 @@ class CanvasScene(QGraphicsScene):
             self.addItem(item)
 
     def _create_text(self, pos):
-        text_elem = TextElement(x=pos.x(), y=pos.y(), text="テキスト")
+        settings = SettingsService.get_instance()
+        text_elem = TextElement(
+            x=pos.x(), y=pos.y(), text="テキスト",
+            font_family=settings.font_family,
+            font_size=settings.font_size
+        )
 
         item = TextGraphicsItem(text_elem)
         item.setZValue(ZVALUE_TEXT)

@@ -28,10 +28,10 @@ class ToolPanel(QWidget):
         self._btn_group.setExclusive(True)
 
         tools = [
-            ("選択", ToolType.SELECT),
-            ("分割線", ToolType.PANEL),
-            ("吹き出し", ToolType.SPEECH_BUBBLE),
-            ("テキスト", ToolType.TEXT),
+            ("選択 (V)", ToolType.SELECT),
+            ("分割線 (P)", ToolType.PANEL),
+            ("吹き出し (B)", ToolType.SPEECH_BUBBLE),
+            ("テキスト (T)", ToolType.TEXT),
         ]
 
         for name, tool_type in tools:
@@ -91,3 +91,11 @@ class ToolPanel(QWidget):
         template = btn.property("template")
         if template:
             self.template_selected.emit(template)
+
+    def set_tool(self, tool_type: ToolType):
+        """外部からツールを設定"""
+        for btn in self._btn_group.buttons():
+            if btn.property("tool_type") == tool_type:
+                btn.setChecked(True)
+                self.tool_changed.emit(tool_type)
+                break

@@ -5,6 +5,7 @@ from PyQt6.QtGui import QPixmap, QImage, QPainter, QColor, QIcon
 
 from src.models.project import Project
 from src.models.page import Page
+from src.services.settings_service import SettingsService
 from src.utils.constants import (
     PANEL_MARGIN, THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, THUMBNAIL_SPACING,
     COLOR_WHITE, COLOR_GRAY, COLOR_BLACK,
@@ -88,9 +89,11 @@ class PageListWidget(QWidget):
 
     def _on_add_clicked(self):
         if self._project:
+            settings = SettingsService.get_instance()
             self._project.pages.append(Page(
-                width=self._project.pages[0].width if self._project.pages else DEFAULT_PAGE_WIDTH,
-                height=self._project.pages[0].height if self._project.pages else DEFAULT_PAGE_HEIGHT
+                width=settings.page_width,
+                height=settings.page_height,
+                margin=settings.page_margin
             ))
             self._refresh_list()
             self._list.setCurrentRow(len(self._project.pages) - 1)

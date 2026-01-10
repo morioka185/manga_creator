@@ -2,13 +2,14 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QSpinBox,
                                QHBoxLayout, QGroupBox, QPushButton,
                                QFontComboBox, QColorDialog, QFrame,
                                QDoubleSpinBox, QFileDialog, QCheckBox,
-                               QPlainTextEdit)
+                               QPlainTextEdit, QScrollArea, QComboBox)
 from PyQt6.QtCore import pyqtSignal, Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QFont
 
 from src.graphics.speech_bubble_item import SpeechBubbleGraphicsItem
 from src.graphics.text_item import TextGraphicsItem
 from src.graphics.divider_line_item import DividerLineItem
+from src.services.settings_service import SettingsService
 from src.utils.constants import (
     DEFAULT_MARGIN, PANEL_MARGIN,
     SPINBOX_POSITION_MIN, SPINBOX_POSITION_MAX,
@@ -16,7 +17,8 @@ from src.utils.constants import (
     SPINBOX_MARGIN_MAX, SPINBOX_GUTTER_MAX, SPINBOX_GUTTER_STEP,
     SPINBOX_ROTATION_MIN, SPINBOX_ROTATION_MAX,
     MIN_IMAGE_SCALE, MAX_IMAGE_SCALE, IMAGE_SCALE_STEP,
-    MIN_FONT_SIZE, MAX_FONT_SIZE, DEFAULT_FONT_SIZE
+    MIN_FONT_SIZE, MAX_FONT_SIZE, DEFAULT_FONT_SIZE,
+    PAGE_SIZE_MIN, PAGE_SIZE_MAX
 )
 
 
@@ -28,6 +30,7 @@ class PropertyPanel(QWidget):
         super().__init__(parent)
         self._current_item = None
         self._current_page = None
+        self._settings = SettingsService.get_instance()
         self._setup_ui()
 
     def _setup_ui(self):
@@ -141,6 +144,15 @@ class PropertyPanel(QWidget):
 
         self._font_group = QGroupBox("フォント")
         font_layout = QVBoxLayout(self._font_group)
+
+        # スタイル選択プルダウン
+        style_row = QHBoxLayout()
+        style_row.addWidget(QLabel("スタイル:"))
+        self._style_combo = QComboBox()
+        self._style_combo.currentIndexChanged.connect(self._on_style_selected)
+        style_row.addWidget(self._style_combo)
+        font_layout.addLayout(style_row)
+
         self._font_combo = QFontComboBox()
         self._font_combo.currentFontChanged.connect(self._on_font_changed)
         font_layout.addWidget(self._font_combo)
@@ -256,6 +268,8 @@ class PropertyPanel(QWidget):
             self._content_edit.blockSignals(True)
             self._content_edit.setPlainText(bubble.text)
             self._content_edit.blockSignals(False)
+            # スタイル名を更新
+            self._refresh_style_combo(bubble.font_family, bubble.font_size)
             self._font_group.show()
             self._content_group.show()
 
@@ -268,6 +282,8 @@ class PropertyPanel(QWidget):
             self._content_edit.blockSignals(True)
             self._content_edit.setPlainText(self._current_item.toPlainText())
             self._content_edit.blockSignals(False)
+            # スタイル名を更新
+            self._refresh_style_combo(text_elem.font_family, text_elem.font_size)
             self._font_group.show()
             self._content_group.show()
 
@@ -369,22 +385,26 @@ class PropertyPanel(QWidget):
         if isinstance(self._current_item, SpeechBubbleGraphicsItem):
             self._current_item.bubble.font_family = font.family()
             self._current_item.update()
+            self._refresh_style_combo(font.family(), self._current_item.bubble.font_size)
         elif isinstance(self._current_item, TextGraphicsItem):
             current_font = self._current_item.font()
             current_font.setFamily(font.family())
             self._current_item.setFont(current_font)
             self._current_item.text_element.font_family = font.family()
+            self._refresh_style_combo(font.family(), self._current_item.text_element.font_size)
         self.property_changed.emit()
 
     def _on_font_size_changed(self, size):
         if isinstance(self._current_item, SpeechBubbleGraphicsItem):
             self._current_item.bubble.font_size = size
             self._current_item.update()
+            self._refresh_style_combo(self._current_item.bubble.font_family, size)
         elif isinstance(self._current_item, TextGraphicsItem):
             current_font = self._current_item.font()
             current_font.setPointSize(size)
             self._current_item.setFont(current_font)
             self._current_item.text_element.font_size = size
+            self._refresh_style_combo(self._current_item.text_element.font_family, size)
         self.property_changed.emit()
 
     def _on_color_clicked(self):
@@ -421,3 +441,51 @@ class PropertyPanel(QWidget):
             self._current_item.setPlainText(text)
             self._current_item.text_element.text = text
             self.property_changed.emit()
+
+    def _refresh_style_combo(self, font_family: str, font_size: int):
+        """スタイルコンボボックスを更新"""
+        self._style_combo.blockSignals(True)
+        self._style_combo.clear()
+        self._style_combo.addItem("(カスタム)", None)
+
+        selected_index = 0
+        styles = self._settings.get_font_styles()
+        for i, style in enumerate(styles):
+            self._style_combo.addItem(style.name, style)
+            if style.font_family == font_family and style.font_size == font_size:
+                selected_index = i + 1  # +1 because of "(カスタム)"
+
+        self._style_combo.setCurrentIndex(selected_index)
+        self._style_combo.blockSignals(False)
+
+    def _on_style_selected(self, index):
+        """スタイル選択時"""
+        if index < 0 or not self._current_item:
+            return
+
+        style = self._style_combo.itemData(index)
+        if style is None:
+            return  # カスタムが選択された場合は何もしない
+
+        # スタイルを適用
+        if isinstance(self._current_item, SpeechBubbleGraphicsItem):
+            self._current_item.bubble.font_family = style.font_family
+            self._current_item.bubble.font_size = style.font_size
+            self._current_item.update()
+        elif isinstance(self._current_item, TextGraphicsItem):
+            font = QFont(style.font_family, style.font_size)
+            font.setBold(style.bold)
+            self._current_item.setFont(font)
+            self._current_item.text_element.font_family = style.font_family
+            self._current_item.text_element.font_size = style.font_size
+
+        # フォントコンボとサイズも更新
+        self._font_combo.blockSignals(True)
+        self._font_size_spin.blockSignals(True)
+        self._font_combo.setCurrentFont(QFont(style.font_family))
+        self._font_size_spin.setValue(style.font_size)
+        self._font_combo.blockSignals(False)
+        self._font_size_spin.blockSignals(False)
+
+        self.property_changed.emit()
+
