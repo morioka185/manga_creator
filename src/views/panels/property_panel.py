@@ -74,7 +74,24 @@ class PropertyPanel(QWidget):
         self._image_btn = QPushButton("画像を選択...")
         self._image_btn.clicked.connect(self._on_select_image)
         image_layout.addWidget(self._image_btn)
-        self._clear_btn = QPushButton("クリア")
+
+        # スケール設定
+        scale_row = QHBoxLayout()
+        scale_row.addWidget(QLabel("拡大率:"))
+        self._scale_spin = QDoubleSpinBox()
+        self._scale_spin.setRange(1.0, 4.0)
+        self._scale_spin.setSingleStep(0.1)
+        self._scale_spin.setValue(1.0)
+        self._scale_spin.valueChanged.connect(self._on_scale_changed)
+        scale_row.addWidget(self._scale_spin)
+        image_layout.addLayout(scale_row)
+
+        # リセットボタン
+        self._reset_btn = QPushButton("位置・サイズをリセット")
+        self._reset_btn.clicked.connect(self._on_reset_image)
+        image_layout.addWidget(self._reset_btn)
+
+        self._clear_btn = QPushButton("画像をクリア")
         self._clear_btn.clicked.connect(self._on_clear_image)
         image_layout.addWidget(self._clear_btn)
         layout.addWidget(self._image_group)
@@ -147,6 +164,22 @@ class PropertyPanel(QWidget):
             self._y_spin.setValue(int(rect.y()))
             self._w_spin.setValue(int(rect.width()))
             self._h_spin.setValue(int(rect.height()))
+
+            # スケール値を更新
+            self._scale_spin.blockSignals(True)
+            image_data = self._current_item.get_image_data()
+            if image_data:
+                self._scale_spin.setValue(image_data.scale)
+                self._scale_spin.setEnabled(True)
+                self._reset_btn.setEnabled(True)
+                self._clear_btn.setEnabled(True)
+            else:
+                self._scale_spin.setValue(1.0)
+                self._scale_spin.setEnabled(False)
+                self._reset_btn.setEnabled(False)
+                self._clear_btn.setEnabled(False)
+            self._scale_spin.blockSignals(False)
+
             self._image_group.show()
 
         # DividerLineItem（分割線）
@@ -207,22 +240,55 @@ class PropertyPanel(QWidget):
             if path:
                 self._current_item.set_image(path)
                 # シーンに保存
-                if self._current_item.scene():
+                image_data = self._current_item.get_image_data()
+                if self._current_item.scene() and image_data:
                     self._current_item.scene()._save_panel_image(
-                        self._current_item.panel_id, path
+                        self._current_item.panel_id, image_data
                     )
+                self._update_ui()  # UIを更新してスケールを有効化
                 self.property_changed.emit()
 
     def _on_clear_image(self):
         # PanelPolygonItem（コマ領域）
         if self._current_item.__class__.__name__ == 'PanelPolygonItem':
             self._current_item.clear_image()
-            # シーンから削除
-            if self._current_item.scene() and self._current_item.scene()._page:
-                panel_images = self._current_item.scene()._page.panel_images
-                if self._current_item.panel_id in panel_images:
-                    del panel_images[self._current_item.panel_id]
+            self._update_ui()  # UIを更新してスケールを無効化
             self.property_changed.emit()
+
+    def _on_scale_changed(self, scale):
+        # PanelPolygonItem（コマ領域）
+        if self._current_item.__class__.__name__ == 'PanelPolygonItem':
+            image_data = self._current_item.get_image_data()
+            if image_data:
+                image_data.scale = scale
+                self._current_item._clamp_offset()
+                self._current_item.update()
+                # シーンに保存
+                if self._current_item.scene():
+                    self._current_item.scene()._save_panel_image(
+                        self._current_item.panel_id, image_data
+                    )
+                self.property_changed.emit()
+
+    def _on_reset_image(self):
+        # PanelPolygonItem（コマ領域）
+        if self._current_item.__class__.__name__ == 'PanelPolygonItem':
+            image_data = self._current_item.get_image_data()
+            if image_data:
+                image_data.scale = 1.0
+                image_data.offset_x = 0.0
+                image_data.offset_y = 0.0
+                self._current_item.update()
+                # スケールスピンボックスを更新
+                self._scale_spin.blockSignals(True)
+                self._scale_spin.setValue(1.0)
+                self._scale_spin.blockSignals(False)
+                # シーンに保存
+                if self._current_item.scene():
+                    self._current_item.scene()._save_panel_image(
+                        self._current_item.panel_id, image_data
+                    )
+                self.property_changed.emit()
 
     def _on_gutter_changed(self, width):
         if isinstance(self._current_item, DividerLineItem):

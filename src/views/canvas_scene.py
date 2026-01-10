@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QGraphicsScene, QGraphicsPolygonItem, QGraphicsLineItem, QFileDialog
+from PyQt6.QtWidgets import QGraphicsScene, QGraphicsPolygonItem, QGraphicsLineItem, QFileDialog, QMenu
 from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QPointF, QLineF
 from PyQt6.QtGui import QPen, QColor, QBrush, QPolygonF, QPixmap, QPainter
 
@@ -6,6 +6,7 @@ from src.models.page import Page
 from src.models.divider_line import DividerLine
 from src.models.speech_bubble import SpeechBubble
 from src.models.text_element import TextElement
+from src.models.panel_image_data import PanelImageData
 from src.graphics.divider_line_item import DividerLineItem
 from src.graphics.speech_bubble_item import SpeechBubbleGraphicsItem
 from src.graphics.text_item import TextGraphicsItem
@@ -16,30 +17,113 @@ from src.utils.enums import ToolType, BubbleType
 class PanelPolygonItem(QGraphicsPolygonItem):
     """コマ領域（ポリゴン）を表示するアイテム"""
 
+    MIN_SCALE = 1.0   # 最小スケール（コマを完全に覆う）
+    MAX_SCALE = 4.0   # 最大スケール（400%）
+    SCALE_STEP = 0.1  # スケール変更ステップ
+
     def __init__(self, polygon: QPolygonF, panel_id: str, parent=None):
         super().__init__(polygon, parent)
         self.panel_id = panel_id
         self._pixmap = None
-        self._image_path = None
+        self._image_data = None  # PanelImageData
+
+        # ドラッグ操作用
+        self._dragging = False
+        self._drag_start_pos = None
+        self._drag_start_offset = None
 
         self.setPen(QPen(QColor(0, 0, 0), 2))
         self.setBrush(QBrush(QColor(255, 255, 255)))
         self.setFlag(QGraphicsPolygonItem.GraphicsItemFlag.ItemIsSelectable)
         self.setAcceptHoverEvents(True)
-        self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton)
+        self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton | Qt.MouseButton.RightButton)
+
+    def set_image_data(self, image_data: PanelImageData):
+        """画像データを設定"""
+        self._image_data = image_data
+        self._pixmap = QPixmap(image_data.image_path)
+        if self._pixmap.isNull():
+            self._pixmap = None
+            self._image_data = None
+        self.update()
 
     def set_image(self, path: str):
-        self._pixmap = QPixmap(path)
-        self._image_path = path
+        """新しい画像を設定（スケール・オフセットはリセット）"""
+        pixmap = QPixmap(path)
+        if not pixmap.isNull():
+            self._pixmap = pixmap
+            self._image_data = PanelImageData(
+                image_path=path,
+                scale=1.0,
+                offset_x=0.0,
+                offset_y=0.0
+            )
+        else:
+            self._pixmap = None
+            self._image_data = None
         self.update()
 
     def clear_image(self):
+        """画像をクリア"""
         self._pixmap = None
-        self._image_path = None
+        self._image_data = None
         self.update()
+        # シーンに通知
+        if self.scene():
+            self.scene()._clear_panel_image(self.panel_id)
+
+    def get_image_data(self) -> PanelImageData:
+        """画像データを取得"""
+        return self._image_data
 
     def get_image_path(self) -> str:
-        return self._image_path
+        """画像パスを取得（後方互換性）"""
+        return self._image_data.image_path if self._image_data else None
+
+    def _get_base_scale(self) -> float:
+        """コマを完全に覆うための基本スケールを計算"""
+        if not self._pixmap or self._pixmap.isNull():
+            return 1.0
+
+        rect = self.polygon().boundingRect()
+        img_w = self._pixmap.width()
+        img_h = self._pixmap.height()
+
+        if img_w == 0 or img_h == 0:
+            return 1.0
+
+        # アスペクト比を維持しながらコマを覆う最小スケール
+        scale_w = rect.width() / img_w
+        scale_h = rect.height() / img_h
+        return max(scale_w, scale_h)
+
+    def _get_scaled_pixmap_size(self) -> tuple:
+        """現在のスケールでの画像サイズを取得"""
+        if not self._pixmap or not self._image_data:
+            return (0, 0)
+
+        base_scale = self._get_base_scale()
+        actual_scale = base_scale * self._image_data.scale
+
+        return (
+            self._pixmap.width() * actual_scale,
+            self._pixmap.height() * actual_scale
+        )
+
+    def _clamp_offset(self):
+        """オフセットを制限（画像がコマ外にはみ出さないように）"""
+        if not self._image_data or not self._pixmap:
+            return
+
+        rect = self.polygon().boundingRect()
+        scaled_w, scaled_h = self._get_scaled_pixmap_size()
+
+        # 画像がコマより大きい場合のみオフセット可能
+        max_offset_x = max(0, (scaled_w - rect.width()) / 2)
+        max_offset_y = max(0, (scaled_h - rect.height()) / 2)
+
+        self._image_data.offset_x = max(-max_offset_x, min(max_offset_x, self._image_data.offset_x))
+        self._image_data.offset_y = max(-max_offset_y, min(max_offset_y, self._image_data.offset_y))
 
     def paint(self, painter: QPainter, option, widget=None):
         # 背景を描画
@@ -48,18 +132,28 @@ class PanelPolygonItem(QGraphicsPolygonItem):
         painter.drawPolygon(self.polygon())
 
         # 画像があれば描画
-        if self._pixmap and not self._pixmap.isNull():
+        if self._pixmap and not self._pixmap.isNull() and self._image_data:
             rect = self.polygon().boundingRect()
+
+            # スケール計算
+            base_scale = self._get_base_scale()
+            actual_scale = base_scale * self._image_data.scale
+
+            scaled_w = int(self._pixmap.width() * actual_scale)
+            scaled_h = int(self._pixmap.height() * actual_scale)
+
             scaled = self._pixmap.scaled(
-                int(rect.width()), int(rect.height()),
-                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                scaled_w, scaled_h,
+                Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation
             )
 
             # クリップしてポリゴン内に描画
             painter.setClipPath(self.shape())
-            x = rect.x() + (rect.width() - scaled.width()) / 2
-            y = rect.y() + (rect.height() - scaled.height()) / 2
+
+            # 中央配置 + オフセット
+            x = rect.x() + (rect.width() - scaled.width()) / 2 + self._image_data.offset_x
+            y = rect.y() + (rect.height() - scaled.height()) / 2 + self._image_data.offset_y
             painter.drawPixmap(int(x), int(y), scaled)
             painter.setClipping(False)
 
@@ -67,6 +161,74 @@ class PanelPolygonItem(QGraphicsPolygonItem):
         painter.setPen(self.pen())
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawPolygon(self.polygon())
+
+        # 選択時は編集可能であることを示す
+        if self.isSelected() and self._image_data:
+            # 選択枠を描画
+            painter.setPen(QPen(QColor(0, 120, 215), 2, Qt.PenStyle.DashLine))
+            painter.drawPolygon(self.polygon())
+
+    def wheelEvent(self, event):
+        """マウスホイールで拡大縮小"""
+        if not self._image_data:
+            return
+
+        # ホイールの回転量を取得
+        delta = event.delta() if hasattr(event, 'delta') else event.angleDelta().y()
+
+        if delta > 0:
+            # 拡大
+            new_scale = min(self.MAX_SCALE, self._image_data.scale + self.SCALE_STEP)
+        else:
+            # 縮小
+            new_scale = max(self.MIN_SCALE, self._image_data.scale - self.SCALE_STEP)
+
+        self._image_data.scale = new_scale
+        self._clamp_offset()
+        self.update()
+
+        # シーンに変更を通知
+        if self.scene():
+            self.scene()._save_panel_image(self.panel_id, self._image_data)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.RightButton:
+            self._show_context_menu(event)
+            return
+
+        if event.button() == Qt.MouseButton.LeftButton and self._image_data:
+            # ドラッグ開始
+            self._dragging = True
+            self._drag_start_pos = event.pos()
+            self._drag_start_offset = (self._image_data.offset_x, self._image_data.offset_y)
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            return
+
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._dragging and self._image_data:
+            # オフセットを更新
+            delta = event.pos() - self._drag_start_pos
+            self._image_data.offset_x = self._drag_start_offset[0] + delta.x()
+            self._image_data.offset_y = self._drag_start_offset[1] + delta.y()
+            self._clamp_offset()
+            self.update()
+            return
+
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self._dragging:
+            self._dragging = False
+            self.setCursor(Qt.CursorShape.OpenHandCursor if self._image_data else Qt.CursorShape.ArrowCursor)
+
+            # シーンに変更を通知
+            if self.scene() and self._image_data:
+                self.scene()._save_panel_image(self.panel_id, self._image_data)
+            return
+
+        super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         """ダブルクリックで画像を選択"""
@@ -77,8 +239,60 @@ class PanelPolygonItem(QGraphicsPolygonItem):
         if path:
             self.set_image(path)
             # シーンに通知
-            if self.scene():
-                self.scene()._save_panel_image(self.panel_id, path)
+            if self.scene() and self._image_data:
+                self.scene()._save_panel_image(self.panel_id, self._image_data)
+
+    def hoverEnterEvent(self, event):
+        if self._image_data:
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event):
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        super().hoverLeaveEvent(event)
+
+    def _show_context_menu(self, event):
+        """右クリックメニューを表示"""
+        menu = QMenu()
+
+        if self._image_data:
+            # 画像がある場合
+            change_action = menu.addAction("画像を変更")
+            clear_action = menu.addAction("画像をクリア")
+            menu.addSeparator()
+            reset_action = menu.addAction("位置・サイズをリセット")
+
+            action = menu.exec(event.screenPos())
+
+            if action == change_action:
+                self._select_new_image()
+            elif action == clear_action:
+                self.clear_image()
+            elif action == reset_action:
+                self._image_data.scale = 1.0
+                self._image_data.offset_x = 0.0
+                self._image_data.offset_y = 0.0
+                self.update()
+                if self.scene():
+                    self.scene()._save_panel_image(self.panel_id, self._image_data)
+        else:
+            # 画像がない場合
+            add_action = menu.addAction("画像を追加")
+            action = menu.exec(event.screenPos())
+
+            if action == add_action:
+                self._select_new_image()
+
+    def _select_new_image(self):
+        """新しい画像を選択"""
+        path, _ = QFileDialog.getOpenFileName(
+            None, "画像を選択", "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
+        )
+        if path:
+            self.set_image(path)
+            if self.scene() and self._image_data:
+                self.scene()._save_panel_image(self.panel_id, self._image_data)
 
 
 class CanvasScene(QGraphicsScene):
@@ -154,17 +368,24 @@ class CanvasScene(QGraphicsScene):
             item = PanelPolygonItem(polygon, panel_id)
             item.setZValue(0)
 
-            # 保存された画像があれば適用
+            # 保存された画像データがあれば適用
             if panel_id in self._page.panel_images:
-                item.set_image(self._page.panel_images[panel_id])
+                image_data = self._page.panel_images[panel_id]
+                item.set_image_data(image_data)
 
             self.addItem(item)
             self._panel_items.append(item)
 
-    def _save_panel_image(self, panel_id: str, path: str):
-        """パネルの画像パスを保存"""
+    def _save_panel_image(self, panel_id: str, image_data: PanelImageData):
+        """パネルの画像データを保存"""
         if self._page:
-            self._page.panel_images[panel_id] = path
+            self._page.panel_images[panel_id] = image_data
+            self.page_modified.emit()
+
+    def _clear_panel_image(self, panel_id: str):
+        """パネルの画像データをクリア"""
+        if self._page and panel_id in self._page.panel_images:
+            del self._page.panel_images[panel_id]
             self.page_modified.emit()
 
     def _on_divider_changed(self):
