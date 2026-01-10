@@ -26,7 +26,7 @@ wheels/
 
 # PyInstaller
 *.manifest
-*.spec
+# *.spec  # manga_creator.spec はリポジトリに含める
 
 # Installer logs
 pip-log.txt

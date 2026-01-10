@@ -189,6 +189,39 @@ manga_creator/
 | PyQt6 | >= 6.6.0 | GUIフレームワーク |
 | reportlab | >= 4.0.0 | PDF生成 |
 | Pillow | >= 10.0.0 | 画像処理 |
+| PyInstaller | >= 6.0.0 | 実行ファイル作成 |
+
+## 実行ファイルの作成（配布用）
+
+非エンジニアでも使えるよう、ダブルクリックで起動できる実行ファイルを作成できます。
+
+### ビルド方法
+
+```bash
+# 依存パッケージをインストール（初回のみ）
+pip install -r requirements.txt
+
+# ビルド実行
+python build.py
+```
+
+### 出力先
+
+| OS | 出力ファイル | 場所 |
+|----|------------|------|
+| Windows | MangaCreator.exe | dist/MangaCreator.exe |
+| Mac | MangaCreator.app | dist/MangaCreator.app |
+
+### 配布方法
+
+1. `dist/` フォルダ内の実行ファイルをZIPで圧縮
+2. ユーザーに配布
+3. ユーザーはダブルクリックで起動可能
+
+### 注意事項
+
+- **クロスコンパイル不可**: Windows用はWindows上で、Mac用はMac上でビルドする必要があります
+- **アイコン設定**: `assets/icon.ico`（Windows用）や `assets/icon.icns`（Mac用）を配置すると、アプリアイコンが適用されます
 
 ## 今後の予定
 
