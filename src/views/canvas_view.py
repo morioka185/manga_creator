@@ -16,6 +16,9 @@ class CanvasView(QGraphicsView):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
 
+        # 残像防止: 全体再描画モード（確実に残像を防ぐ）
+        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.FullViewportUpdate)
+
         self._zoom = DEFAULT_ZOOM
         self._first_show = True
 

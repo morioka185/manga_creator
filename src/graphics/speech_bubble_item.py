@@ -35,9 +35,18 @@ class SpeechBubbleGraphicsItem(QGraphicsItem):
 
     def boundingRect(self) -> QRectF:
         margin = BUBBLE_BOUNDING_MARGIN
-        return QRectF(-margin, -margin,
+        # 基本の吹き出し領域
+        rect = QRectF(-margin, -margin,
                       self.bubble.width + margin * 2,
                       self.bubble.height + margin * 2)
+        # 尻尾の位置も含める（残像防止）
+        tail_rect = QRectF(
+            self.bubble.tail_x - TAIL_HANDLE_SIZE,
+            self.bubble.tail_y - TAIL_HANDLE_SIZE,
+            TAIL_HANDLE_SIZE * 2,
+            TAIL_HANDLE_SIZE * 2
+        )
+        return rect.united(tail_rect)
 
     def paint(self, painter: QPainter, option, widget=None):
         rect = QRectF(0, 0, self.bubble.width, self.bubble.height)
@@ -197,6 +206,8 @@ class SpeechBubbleGraphicsItem(QGraphicsItem):
 
     def mouseMoveEvent(self, event):
         if self._dragging_tail:
+            # 残像防止: 形状変更前に呼び出す
+            self.prepareGeometryChange()
             self.bubble.tail_x = event.pos().x()
             self.bubble.tail_y = event.pos().y()
             self.update()

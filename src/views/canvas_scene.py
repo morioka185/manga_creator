@@ -321,6 +321,9 @@ class CanvasScene(QGraphicsScene):
         self._panel_items = []
         self._undo_stack = None
 
+        # 残像防止: アイテムインデックスを最適化
+        self.setItemIndexMethod(QGraphicsScene.ItemIndexMethod.BspTreeIndex)
+
         self.divider_changed.connect(self._on_divider_changed)
 
     def set_undo_stack(self, undo_stack):
