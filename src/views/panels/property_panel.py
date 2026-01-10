@@ -1,8 +1,8 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QSpinBox,
                                QHBoxLayout, QGroupBox, QPushButton,
                                QFontComboBox, QColorDialog, QFrame,
-                               QDoubleSpinBox, QFileDialog)
-from PyQt6.QtCore import pyqtSignal
+                               QDoubleSpinBox, QFileDialog, QCheckBox)
+from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QColor
 
 from src.graphics.speech_bubble_item import SpeechBubbleGraphicsItem
@@ -132,6 +132,12 @@ class PropertyPanel(QWidget):
         self._color_btn.clicked.connect(self._on_color_clicked)
         font_layout.addWidget(self._color_btn)
 
+        # 縦書きチェックボックス（吹き出し用）
+        self._vertical_check = QCheckBox("縦書き")
+        self._vertical_check.setChecked(True)
+        self._vertical_check.stateChanged.connect(self._on_vertical_changed)
+        font_layout.addWidget(self._vertical_check)
+
         layout.addWidget(self._font_group)
         self._font_group.hide()
 
@@ -196,12 +202,18 @@ class PropertyPanel(QWidget):
             self._y_spin.setValue(int(bubble.y))
             self._w_spin.setValue(int(bubble.width))
             self._h_spin.setValue(int(bubble.height))
+            # 縦書き設定
+            self._vertical_check.blockSignals(True)
+            self._vertical_check.setChecked(bubble.vertical)
+            self._vertical_check.blockSignals(False)
+            self._vertical_check.show()
             self._font_group.show()
 
         elif isinstance(self._current_item, TextGraphicsItem):
             text_elem = self._current_item.text_element
             self._x_spin.setValue(int(text_elem.x))
             self._y_spin.setValue(int(text_elem.y))
+            self._vertical_check.hide()  # テキスト要素には縦書き設定なし
             self._font_group.show()
 
         self._x_spin.blockSignals(False)
@@ -325,4 +337,11 @@ class PropertyPanel(QWidget):
         if color.isValid() and isinstance(self._current_item, TextGraphicsItem):
             self._current_item.setDefaultTextColor(color)
             self._current_item.text_element.color = color.name()
+            self.property_changed.emit()
+
+    def _on_vertical_changed(self, state):
+        """縦書き/横書き切替"""
+        if isinstance(self._current_item, SpeechBubbleGraphicsItem):
+            self._current_item.bubble.vertical = (state == Qt.CheckState.Checked.value)
+            self._current_item.update()
             self.property_changed.emit()

@@ -17,4 +17,5 @@ class SpeechBubble:
     font_size: int = 14
     tail_x: float = 0
     tail_y: float = 0
+    vertical: bool = True  # 縦書き（デフォルト）
     id: str = field(default_factory=lambda: str(uuid.uuid4()))

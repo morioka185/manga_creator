@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import QGraphicsItem, QGraphicsTextItem, QInputDialog
 from PyQt6.QtCore import Qt, QRectF, QPointF
-from PyQt6.QtGui import QPen, QBrush, QColor, QPainter, QFont
+from PyQt6.QtGui import QPen, QBrush, QColor, QPainter, QFont, QFontMetrics
 
 from src.models.speech_bubble import SpeechBubble
 from src.graphics.bubble_shapes import BubbleShapes
@@ -8,6 +8,10 @@ from src.utils.constants import HANDLE_SIZE, MIN_PANEL_SIZE
 
 
 class SpeechBubbleGraphicsItem(QGraphicsItem):
+    # 縦書き時に回転させる文字（括弧など）
+    ROTATE_CHARS = '（）「」『』【】〈〉《》｛｝［］(){}[]<>'
+    # 縦書き時に位置調整する句読点
+    PUNCT_CHARS = '、。，．・：；'
     def __init__(self, bubble: SpeechBubble, parent=None):
         super().__init__(parent)
         self.bubble = bubble
@@ -45,11 +49,58 @@ class SpeechBubbleGraphicsItem(QGraphicsItem):
         painter.setPen(QPen(QColor(0, 0, 0)))
 
         text_rect = rect.adjusted(10, 10, -10, -10)
-        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
-                         self.bubble.text)
+
+        if self.bubble.vertical:
+            self._draw_vertical_text(painter, text_rect, self.bubble.text, font)
+        else:
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
+                             self.bubble.text)
 
         if self.isSelected():
             self._draw_handles(painter, rect)
+
+    def _draw_vertical_text(self, painter: QPainter, rect: QRectF, text: str, font: QFont):
+        """縦書きテキストを描画"""
+        if not text:
+            return
+
+        fm = QFontMetrics(font)
+        char_height = fm.height()
+        char_width = fm.averageCharWidth()
+        line_spacing = char_width * 1.5  # 行間（縦書きでは横方向）
+
+        # 改行で分割
+        lines = text.split('\n')
+
+        # 全体の幅を計算（右から左に配置）
+        total_width = len(lines) * line_spacing
+        start_x = rect.center().x() + total_width / 2 - line_spacing / 2
+
+        for line_idx, line in enumerate(lines):
+            # 各行のX位置（右から左）
+            x = start_x - line_idx * line_spacing
+
+            # 行の高さを計算して中央揃え
+            line_height = len(line) * char_height
+            start_y = rect.center().y() - line_height / 2 + char_height / 2
+
+            for char_idx, char in enumerate(line):
+                y = start_y + char_idx * char_height
+
+                # 括弧類は90度回転
+                if char in self.ROTATE_CHARS:
+                    painter.save()
+                    painter.translate(x, y)
+                    painter.rotate(90)
+                    painter.drawText(QPointF(-char_width/2, char_height/4), char)
+                    painter.restore()
+                # 句読点は右上に配置
+                elif char in self.PUNCT_CHARS:
+                    painter.drawText(QPointF(x + char_width/3, y - char_height/3), char)
+                else:
+                    # 通常の文字は中央に配置
+                    char_rect = QRectF(x - char_width/2, y - char_height/2, char_width, char_height)
+                    painter.drawText(char_rect, Qt.AlignmentFlag.AlignCenter, char)
 
     def _draw_handles(self, painter: QPainter, rect: QRectF):
         handles = self._get_handles(rect)
