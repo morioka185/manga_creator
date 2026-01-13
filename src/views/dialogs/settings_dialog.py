@@ -2,12 +2,14 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
     QGroupBox, QLabel, QSpinBox, QCheckBox, QFontComboBox,
     QPushButton, QListWidget, QListWidgetItem, QLineEdit,
-    QDialogButtonBox, QMessageBox, QInputDialog
+    QDialogButtonBox, QMessageBox, QInputDialog, QFileDialog,
+    QDoubleSpinBox, QPlainTextEdit
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
 from src.services.settings_service import SettingsService, FontStyle
+from src.services.forge_service import ForgeService
 from src.utils.constants import (
     MIN_FONT_SIZE, MAX_FONT_SIZE,
     SPINBOX_SIZE_MIN, SPINBOX_SIZE_MAX,
@@ -43,6 +45,11 @@ class SettingsDialog(QDialog):
         self._styles_tab = QWidget()
         self._setup_styles_tab()
         self._tabs.addTab(self._styles_tab, "スタイルプリセット")
+
+        # AI画像生成タブ
+        self._forge_tab = QWidget()
+        self._setup_forge_tab()
+        self._tabs.addTab(self._forge_tab, "AI画像生成")
 
         # ボタン
         button_box = QDialogButtonBox(
@@ -183,6 +190,201 @@ class SettingsDialog(QDialog):
         right_layout.addStretch()
         layout.addLayout(right_layout)
 
+    def _setup_forge_tab(self):
+        """AI画像生成（Forge）タブを設定"""
+        layout = QVBoxLayout(self._forge_tab)
+
+        # Forge接続設定
+        connection_group = QGroupBox("Forge接続設定")
+        connection_layout = QVBoxLayout(connection_group)
+
+        # パス設定
+        path_row = QHBoxLayout()
+        path_row.addWidget(QLabel("Forgeパス:"))
+        self._forge_path_edit = QLineEdit()
+        self._forge_path_edit.setPlaceholderText("例: C:\\StabilityMatrix\\Data\\Packages\\stable-diffusion-webui-forge")
+        path_row.addWidget(self._forge_path_edit)
+        self._forge_browse_btn = QPushButton("参照...")
+        self._forge_browse_btn.clicked.connect(self._on_browse_forge_path)
+        path_row.addWidget(self._forge_browse_btn)
+        connection_layout.addLayout(path_row)
+
+        # API URL設定
+        url_row = QHBoxLayout()
+        url_row.addWidget(QLabel("API URL:"))
+        self._forge_url_edit = QLineEdit()
+        self._forge_url_edit.setPlaceholderText("例: http://127.0.0.1:7860")
+        url_row.addWidget(self._forge_url_edit)
+        self._forge_test_btn = QPushButton("接続テスト")
+        self._forge_test_btn.clicked.connect(self._on_test_forge_connection)
+        url_row.addWidget(self._forge_test_btn)
+        self._forge_ext_btn = QPushButton("拡張機能確認")
+        self._forge_ext_btn.clicked.connect(self._on_check_extensions)
+        url_row.addWidget(self._forge_ext_btn)
+        connection_layout.addLayout(url_row)
+
+        # 自動起動設定
+        self._forge_auto_launch_check = QCheckBox("AI生成時にForgeを自動起動")
+        connection_layout.addWidget(self._forge_auto_launch_check)
+
+        # API-onlyモード設定
+        self._forge_api_only_check = QCheckBox("API-onlyモードで起動（UIなし、高速）")
+        self._forge_api_only_check.setToolTip("チェックを外すとForge UIも表示されます。エラーが発生する場合はオフにしてください。")
+        connection_layout.addWidget(self._forge_api_only_check)
+
+        # タイムアウト設定
+        timeout_row = QHBoxLayout()
+        timeout_row.addWidget(QLabel("起動タイムアウト:"))
+        self._forge_timeout_spin = QSpinBox()
+        self._forge_timeout_spin.setRange(30, 300)
+        self._forge_timeout_spin.setSuffix(" 秒")
+        timeout_row.addWidget(self._forge_timeout_spin)
+        timeout_row.addStretch()
+        connection_layout.addLayout(timeout_row)
+
+        layout.addWidget(connection_group)
+
+        # デフォルト生成設定
+        gen_group = QGroupBox("デフォルト生成設定")
+        gen_layout = QVBoxLayout(gen_group)
+
+        # デフォルトプロンプト
+        gen_layout.addWidget(QLabel("デフォルトプロンプト:"))
+        self._default_prompt_edit = QPlainTextEdit()
+        self._default_prompt_edit.setMaximumHeight(60)
+        gen_layout.addWidget(self._default_prompt_edit)
+
+        # デフォルトネガティブプロンプト
+        gen_layout.addWidget(QLabel("デフォルトネガティブプロンプト:"))
+        self._default_neg_prompt_edit = QPlainTextEdit()
+        self._default_neg_prompt_edit.setMaximumHeight(60)
+        gen_layout.addWidget(self._default_neg_prompt_edit)
+
+        # Steps, CFG Scale, Sampler
+        params_row = QHBoxLayout()
+        params_row.addWidget(QLabel("Steps:"))
+        self._default_steps_spin = QSpinBox()
+        self._default_steps_spin.setRange(1, 150)
+        params_row.addWidget(self._default_steps_spin)
+
+        params_row.addWidget(QLabel("CFG Scale:"))
+        self._default_cfg_spin = QDoubleSpinBox()
+        self._default_cfg_spin.setRange(1.0, 30.0)
+        self._default_cfg_spin.setSingleStep(0.5)
+        params_row.addWidget(self._default_cfg_spin)
+
+        params_row.addWidget(QLabel("サンプラー:"))
+        self._default_sampler_edit = QLineEdit()
+        self._default_sampler_edit.setMaximumWidth(120)
+        params_row.addWidget(self._default_sampler_edit)
+
+        params_row.addStretch()
+        gen_layout.addLayout(params_row)
+
+        layout.addWidget(gen_group)
+        layout.addStretch()
+
+    def _on_browse_forge_path(self):
+        """Forgeパス参照"""
+        path = QFileDialog.getExistingDirectory(
+            self, "Forgeフォルダを選択",
+            self._forge_path_edit.text()
+        )
+        if path:
+            self._forge_path_edit.setText(path)
+
+    def _on_test_forge_connection(self):
+        """Forge接続テスト"""
+        url = self._forge_url_edit.text().strip()
+        if not url:
+            QMessageBox.warning(self, "エラー", "API URLを入力してください")
+            return
+
+        if ForgeService.check_connection(url):
+            # 詳細情報を取得
+            ready, status = ForgeService.check_ready(url)
+            options = ForgeService.get_options(url)
+            model = options.get('sd_model_checkpoint', '不明')
+            sampler = options.get('samples_save', '不明')
+
+            msg = f"Forgeに接続できました\n\n"
+            msg += f"モデル: {model}\n"
+
+            if ready:
+                QMessageBox.information(self, "成功", msg)
+            else:
+                msg += f"\n警告: {status}"
+                QMessageBox.warning(self, "接続成功（警告あり）", msg)
+        else:
+            QMessageBox.warning(
+                self, "失敗",
+                "Forgeに接続できませんでした\n\n"
+                "・Forgeが起動しているか確認してください\n"
+                "・--api オプションで起動しているか確認してください"
+            )
+
+    def _on_check_extensions(self):
+        """拡張機能の確認"""
+        url = self._forge_url_edit.text().strip()
+        if not url:
+            QMessageBox.warning(self, "エラー", "API URLを入力してください")
+            return
+
+        if not ForgeService.check_connection(url):
+            QMessageBox.warning(self, "エラー", "Forgeに接続できません。先に接続テストを行ってください。")
+            return
+
+        # 拡張機能状態を取得
+        ext_status = ForgeService.check_extension_status(url)
+
+        # 結果メッセージ作成
+        msg = "【複数キャラクター生成に必要な拡張機能】\n\n"
+
+        # Regional Prompter
+        rp = ext_status["regional_prompter"]
+        if rp["enabled"]:
+            msg += f"Regional Prompter: OK\n   名前: {rp['name']}\n\n"
+        elif rp["installed"]:
+            msg += "Regional Prompter: インストール済（無効）\n   Forgeで有効化してください\n\n"
+        else:
+            msg += "Regional Prompter: 未インストール\n   推奨: sd-forge-regional-prompter\n\n"
+
+        # ADetailer
+        ad = ext_status["adetailer"]
+        if ad["enabled"]:
+            msg += f"ADetailer: OK\n   名前: {ad['name']}\n\n"
+        elif ad["installed"]:
+            msg += "ADetailer: インストール済（無効）\n   Forgeで有効化してください\n\n"
+        else:
+            msg += "ADetailer: 未インストール\n   推奨: adetailer\n\n"
+
+        # ControlNet
+        cn = ext_status["controlnet"]
+        if cn["enabled"]:
+            msg += f"ControlNet: OK\n   名前: {cn['name']}\n\n"
+        elif cn["installed"]:
+            msg += "ControlNet: インストール済（無効）\n   Forgeで有効化してください\n\n"
+        else:
+            msg += "ControlNet: 未インストール\n   IP-Adapterに必要です\n\n"
+
+        # IP-Adapterモデル確認
+        ip_models = ForgeService.get_ip_adapter_models(url)
+        if ip_models:
+            msg += f"IP-Adapterモデル: {len(ip_models)}個検出\n"
+            for m in ip_models[:3]:  # 最大3つ表示
+                msg += f"   - {m}\n"
+            if len(ip_models) > 3:
+                msg += f"   ... 他{len(ip_models)-3}個\n"
+        else:
+            msg += "IP-Adapterモデル: 未検出\n   キャラクター参照画像機能に必要です\n"
+
+        # 全てOKかチェック
+        all_ok = rp["enabled"] and ad["enabled"] and cn["enabled"]
+        if all_ok:
+            QMessageBox.information(self, "拡張機能確認", msg + "\n全ての拡張機能が利用可能です")
+        else:
+            QMessageBox.warning(self, "拡張機能確認", msg + "\n一部の拡張機能が不足しています")
+
     def _load_settings(self):
         """設定を読み込み"""
         # デフォルト設定
@@ -197,6 +399,18 @@ class SettingsDialog(QDialog):
 
         # スタイルリスト
         self._refresh_style_list()
+
+        # Forge設定
+        self._forge_path_edit.setText(self._settings.forge_path)
+        self._forge_url_edit.setText(self._settings.forge_api_url)
+        self._forge_auto_launch_check.setChecked(self._settings.forge_auto_launch)
+        self._forge_api_only_check.setChecked(self._settings.forge_api_only)
+        self._forge_timeout_spin.setValue(self._settings.forge_startup_timeout)
+        self._default_prompt_edit.setPlainText(self._settings.default_prompt)
+        self._default_neg_prompt_edit.setPlainText(self._settings.default_negative_prompt)
+        self._default_steps_spin.setValue(self._settings.default_steps)
+        self._default_cfg_spin.setValue(self._settings.default_cfg_scale)
+        self._default_sampler_edit.setText(self._settings.default_sampler)
 
     def _refresh_style_list(self):
         """スタイルリストを更新"""
@@ -293,4 +507,17 @@ class SettingsDialog(QDialog):
         self._settings.page_width = self._page_w_spin.value()
         self._settings.page_height = self._page_h_spin.value()
         self._settings.page_margin = self._margin_spin.value()
+
+        # Forge設定を保存
+        self._settings.forge_path = self._forge_path_edit.text()
+        self._settings.forge_api_url = self._forge_url_edit.text()
+        self._settings.forge_auto_launch = self._forge_auto_launch_check.isChecked()
+        self._settings.forge_api_only = self._forge_api_only_check.isChecked()
+        self._settings.forge_startup_timeout = self._forge_timeout_spin.value()
+        self._settings.default_prompt = self._default_prompt_edit.toPlainText()
+        self._settings.default_negative_prompt = self._default_neg_prompt_edit.toPlainText()
+        self._settings.default_steps = self._default_steps_spin.value()
+        self._settings.default_cfg_scale = self._default_cfg_spin.value()
+        self._settings.default_sampler = self._default_sampler_edit.text()
+
         self.accept()

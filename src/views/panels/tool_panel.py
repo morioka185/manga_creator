@@ -1,14 +1,13 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QButtonGroup,
-                               QLabel, QComboBox, QFrame)
+                               QLabel, QFrame)
 from PyQt6.QtCore import pyqtSignal
 
-from src.utils.enums import ToolType, BubbleType
+from src.utils.enums import ToolType
 from src.services.template_service import TemplateService, Template
 
 
 class ToolPanel(QWidget):
     tool_changed = pyqtSignal(ToolType)
-    bubble_type_changed = pyqtSignal(BubbleType)
     template_selected = pyqtSignal(object)
 
     def __init__(self, parent=None):
@@ -31,7 +30,6 @@ class ToolPanel(QWidget):
             ("選択 (V)", ToolType.SELECT),
             ("分割線 (P)", ToolType.PANEL),
             ("吹き出し (B)", ToolType.SPEECH_BUBBLE),
-            ("テキスト (T)", ToolType.TEXT),
         ]
 
         for name, tool_type in tools:
@@ -49,22 +47,6 @@ class ToolPanel(QWidget):
         separator.setFrameShape(QFrame.Shape.HLine)
         layout.addWidget(separator)
 
-        bubble_label = QLabel("吹き出し種類")
-        bubble_label.setStyleSheet("font-weight: bold;")
-        layout.addWidget(bubble_label)
-
-        self._bubble_combo = QComboBox()
-        self._bubble_combo.addItem("楕円", BubbleType.OVAL)
-        self._bubble_combo.addItem("角丸", BubbleType.ROUNDED_RECT)
-        self._bubble_combo.addItem("雲形", BubbleType.CLOUD)
-        self._bubble_combo.addItem("爆発", BubbleType.EXPLOSION)
-        self._bubble_combo.currentIndexChanged.connect(self._on_bubble_changed)
-        layout.addWidget(self._bubble_combo)
-
-        separator2 = QFrame()
-        separator2.setFrameShape(QFrame.Shape.HLine)
-        layout.addWidget(separator2)
-
         template_label = QLabel("テンプレート")
         template_label.setStyleSheet("font-weight: bold;")
         layout.addWidget(template_label)
@@ -81,10 +63,6 @@ class ToolPanel(QWidget):
     def _on_tool_clicked(self, btn):
         tool_type = btn.property("tool_type")
         self.tool_changed.emit(tool_type)
-
-    def _on_bubble_changed(self, index):
-        bubble_type = self._bubble_combo.itemData(index)
-        self.bubble_type_changed.emit(bubble_type)
 
     def _on_template_clicked(self):
         btn = self.sender()

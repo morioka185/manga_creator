@@ -1,5 +1,6 @@
 from PyQt6.QtWidgets import QGraphicsScene
 from PyQt6.QtGui import QImage, QPainter, QColor
+from PyQt6.QtCore import QBuffer, QIODevice
 
 from reportlab.pdfgen import canvas as pdf_canvas
 from reportlab.lib.utils import ImageReader
@@ -94,11 +95,13 @@ class ExportService:
             # 分割線を復元
             ExportService._restore_dividers(divider_states)
 
-            buffer = io.BytesIO()
-            image.save(buffer, "PNG")
-            buffer.seek(0)
+            qt_buffer = QBuffer()
+            qt_buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+            image.save(qt_buffer, "PNG")
+            qt_buffer.close()
 
-            pil_img = Image.open(buffer)
+            pil_buffer = io.BytesIO(qt_buffer.data().data())
+            pil_img = Image.open(pil_buffer)
             img_reader = ImageReader(pil_img)
 
             c.drawImage(img_reader, 0, 0,

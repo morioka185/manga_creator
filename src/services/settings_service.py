@@ -54,6 +54,18 @@ class SettingsService:
         'page_height': DEFAULT_PAGE_HEIGHT,
         'page_margin': DEFAULT_MARGIN,
         'font_styles': None,  # 初期化時にDEFAULT_STYLESからコピー
+        # Forge設定
+        'forge_path': r'C:\StabilityMatrix\Data\Packages\stable-diffusion-webui-forge',
+        'forge_api_url': 'http://127.0.0.1:7860',
+        'forge_auto_launch': True,
+        'forge_api_only': True,  # UIなしでAPIのみモードで起動
+        'forge_startup_timeout': 120,
+        'default_prompt': 'masterpiece, best quality, monochrome, greyscale',
+        'default_negative_prompt': 'worst quality, bad quality, blurry, signature, watermark',
+        'default_steps': 20,
+        'default_cfg_scale': 6.0,
+        'default_sampler': 'Euler a',
+        'default_gen_size_preset': 0,  # 0 = 832x1216（縦長・推奨）
     }
 
     @classmethod
@@ -220,3 +232,92 @@ class SettingsService:
         """フォントスタイルをデフォルトにリセット"""
         self._settings['font_styles'] = [s.copy() for s in self.DEFAULT_STYLES]
         self.save_settings()
+
+    # Forge設定プロパティ
+    @property
+    def forge_path(self) -> str:
+        return self.get('forge_path')
+
+    @forge_path.setter
+    def forge_path(self, value: str):
+        self.set('forge_path', value)
+
+    @property
+    def forge_api_url(self) -> str:
+        return self.get('forge_api_url')
+
+    @forge_api_url.setter
+    def forge_api_url(self, value: str):
+        self.set('forge_api_url', value)
+
+    @property
+    def forge_auto_launch(self) -> bool:
+        return self.get('forge_auto_launch')
+
+    @forge_auto_launch.setter
+    def forge_auto_launch(self, value: bool):
+        self.set('forge_auto_launch', value)
+
+    @property
+    def forge_startup_timeout(self) -> int:
+        return self.get('forge_startup_timeout')
+
+    @forge_startup_timeout.setter
+    def forge_startup_timeout(self, value: int):
+        self.set('forge_startup_timeout', value)
+
+    @property
+    def forge_api_only(self) -> bool:
+        return self.get('forge_api_only')
+
+    @forge_api_only.setter
+    def forge_api_only(self, value: bool):
+        self.set('forge_api_only', value)
+
+    @property
+    def default_prompt(self) -> str:
+        return self.get('default_prompt')
+
+    @default_prompt.setter
+    def default_prompt(self, value: str):
+        self.set('default_prompt', value)
+
+    @property
+    def default_negative_prompt(self) -> str:
+        return self.get('default_negative_prompt')
+
+    @default_negative_prompt.setter
+    def default_negative_prompt(self, value: str):
+        self.set('default_negative_prompt', value)
+
+    @property
+    def default_steps(self) -> int:
+        return self.get('default_steps')
+
+    @default_steps.setter
+    def default_steps(self, value: int):
+        self.set('default_steps', value)
+
+    @property
+    def default_cfg_scale(self) -> float:
+        return self.get('default_cfg_scale')
+
+    @default_cfg_scale.setter
+    def default_cfg_scale(self, value: float):
+        self.set('default_cfg_scale', value)
+
+    @property
+    def default_sampler(self) -> str:
+        return self.get('default_sampler')
+
+    @default_sampler.setter
+    def default_sampler(self, value: str):
+        self.set('default_sampler', value)
+
+    @property
+    def default_gen_size_preset(self) -> int:
+        return self.get('default_gen_size_preset')
+
+    @default_gen_size_preset.setter
+    def default_gen_size_preset(self, value: int):
+        self.set('default_gen_size_preset', value)

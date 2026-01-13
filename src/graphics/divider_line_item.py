@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QGraphicsLineItem, QGraphicsItem, QGraphicsEllipseItem
+from PyQt6.QtWidgets import QGraphicsLineItem, QGraphicsItem
 from PyQt6.QtCore import Qt, QPointF, QLineF, QRectF
 from PyQt6.QtGui import QPen, QBrush, QColor, QPainter
 
@@ -128,6 +128,18 @@ class DividerLineItem(QGraphicsLineItem):
             self.update()
             return
         super().mouseMoveEvent(event)
+
+    def _constrain_to_direction(self, new_pos: QPointF, fixed_pos: QPointF) -> QPointF:
+        """水平または垂直方向に制約"""
+        line = self.line()
+        is_horizontal = abs(line.p1().y() - line.p2().y()) < abs(line.p1().x() - line.p2().x())
+
+        if is_horizontal:
+            # 水平線: Y座標を固定
+            return QPointF(new_pos.x(), fixed_pos.y())
+        else:
+            # 垂直線: X座標を固定
+            return QPointF(fixed_pos.x(), new_pos.y())
 
     def mouseReleaseEvent(self, event):
         if self._dragging:

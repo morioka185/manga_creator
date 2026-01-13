@@ -115,8 +115,18 @@ class PageListWidget(QWidget):
         if action == delete_action:
             if len(self._project.pages) > 1:
                 self._project.pages.pop(row)
-                self._refresh_list()
+                # 削除されたページのインデックスを先に通知
                 self.page_deleted.emit(row)
+                # リストを更新（setCurrentRowはせず手動で選択）
+                self._list.clear()
+                for i, page in enumerate(self._project.pages):
+                    item = QListWidgetItem(f"P{i + 1}")
+                    thumbnail = self._create_thumbnail(page)
+                    item.setIcon(QIcon(thumbnail))
+                    self._list.addItem(item)
+                # 適切なページを選択
+                new_row = min(row, len(self._project.pages) - 1)
+                self._list.setCurrentRow(new_row)
         elif action == duplicate_action:
             original = self._project.pages[row]
             new_page = Page(width=original.width, height=original.height)

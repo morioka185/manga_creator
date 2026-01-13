@@ -5,16 +5,16 @@ from src.models.project import Project
 from src.models.page import Page
 from src.models.divider_line import DividerLine
 from src.models.speech_bubble import SpeechBubble
-from src.models.text_element import TextElement
 from src.models.panel_image_data import PanelImageData
+from src.models.character import Character
 from src.utils.enums import BubbleType
-from src.utils.constants import DEFAULT_MARGIN
+from src.utils.constants import DEFAULT_MARGIN, ROUNDED_RECT_RADIUS, DEFAULT_BUBBLE_WIDTH, DEFAULT_BUBBLE_HEIGHT
 
 
 class ProjectSerializer:
     """プロジェクトのシリアライズ/デシリアライズを行うサービス"""
 
-    FILE_VERSION = "1.0"
+    FILE_VERSION = "1.1"
 
     @staticmethod
     def serialize(project: Project) -> str:
@@ -22,7 +22,8 @@ class ProjectSerializer:
         data = {
             "version": ProjectSerializer.FILE_VERSION,
             "name": project.name,
-            "pages": [ProjectSerializer._serialize_page(page) for page in project.pages]
+            "pages": [ProjectSerializer._serialize_page(page) for page in project.pages],
+            "characters": [char.to_dict() for char in project.characters]
         }
         return json.dumps(data, ensure_ascii=False, indent=2)
 
@@ -39,8 +40,7 @@ class ProjectSerializer:
                 panel_id: ProjectSerializer._serialize_panel_image(img_data)
                 for panel_id, img_data in page.panel_images.items()
             },
-            "speech_bubbles": [ProjectSerializer._serialize_bubble(b) for b in page.speech_bubbles],
-            "text_elements": [ProjectSerializer._serialize_text(t) for t in page.text_elements]
+            "speech_bubbles": [ProjectSerializer._serialize_bubble(b) for b in page.speech_bubbles]
         }
 
     @staticmethod
@@ -56,12 +56,7 @@ class ProjectSerializer:
 
     @staticmethod
     def _serialize_panel_image(img_data: PanelImageData) -> dict:
-        return {
-            "image_path": img_data.image_path,
-            "scale": img_data.scale,
-            "offset_x": img_data.offset_x,
-            "offset_y": img_data.offset_y
-        }
+        return img_data.to_dict()
 
     @staticmethod
     def _serialize_bubble(bubble: SpeechBubble) -> dict:
@@ -77,20 +72,11 @@ class ProjectSerializer:
             "font_size": bubble.font_size,
             "tail_x": bubble.tail_x,
             "tail_y": bubble.tail_y,
-            "vertical": bubble.vertical
-        }
-
-    @staticmethod
-    def _serialize_text(text: TextElement) -> dict:
-        return {
-            "id": text.id,
-            "x": text.x,
-            "y": text.y,
-            "text": text.text,
-            "font_family": text.font_family,
-            "font_size": text.font_size,
-            "color": text.color,
-            "rotation": text.rotation
+            "vertical": bubble.vertical,
+            "auto_font_size": bubble.auto_font_size,
+            "rotation": bubble.rotation,
+            "color": bubble.color,
+            "corner_radius": bubble.corner_radius
         }
 
     @staticmethod
@@ -98,11 +84,15 @@ class ProjectSerializer:
         """JSON文字列からプロジェクトを復元"""
         try:
             data = json.loads(json_str)
-            project = Project(name=data.get("name", "Untitled"), pages=[])
+            project = Project(name=data.get("name", "Untitled"), pages=[], characters=[])
 
             for page_data in data.get("pages", []):
                 page = ProjectSerializer._deserialize_page(page_data)
                 project.pages.append(page)
+
+            # キャラクター復元
+            for char_data in data.get("characters", []):
+                project.characters.append(Character.from_dict(char_data))
 
             # ページが空なら1ページ追加
             if not project.pages:
@@ -123,8 +113,7 @@ class ProjectSerializer:
             margin=data.get("margin", DEFAULT_MARGIN),
             divider_lines=[],
             panel_images={},
-            speech_bubbles=[],
-            text_elements=[]
+            speech_bubbles=[]
         )
 
         # 分割線
@@ -139,9 +128,9 @@ class ProjectSerializer:
         for b_data in data.get("speech_bubbles", []):
             page.speech_bubbles.append(ProjectSerializer._deserialize_bubble(b_data))
 
-        # テキスト
+        # 後方互換性: 旧text_elementsをTEXT_ONLYタイプのspeech_bubblesに変換
         for t_data in data.get("text_elements", []):
-            page.text_elements.append(ProjectSerializer._deserialize_text(t_data))
+            page.speech_bubbles.append(ProjectSerializer._migrate_text_to_bubble(t_data))
 
         return page
 
@@ -158,48 +147,64 @@ class ProjectSerializer:
 
     @staticmethod
     def _deserialize_panel_image(data: dict) -> PanelImageData:
-        return PanelImageData(
-            image_path=data.get("image_path", ""),
-            scale=data.get("scale", 1.0),
-            offset_x=data.get("offset_x", 0.0),
-            offset_y=data.get("offset_y", 0.0)
-        )
+        return PanelImageData.from_dict(data)
 
     @staticmethod
     def _deserialize_bubble(data: dict) -> SpeechBubble:
-        bubble_type = BubbleType.OVAL
-        type_name = data.get("bubble_type", "OVAL")
+        bubble_type = BubbleType.SPEECH
+        type_name = data.get("bubble_type", "SPEECH")
+
+        # 後方互換性: 旧タイプ名をマッピング
+        type_mapping = {
+            "ROUNDED_RECT": "RECTANGLE",  # 角丸四角形は長方形に統合
+            "OVAL": "OVAL",  # 旧OVALはそのまま（尻尾なしに変更）
+        }
+        type_name = type_mapping.get(type_name, type_name)
+
         try:
             bubble_type = BubbleType[type_name]
         except KeyError:
-            pass
+            bubble_type = BubbleType.SPEECH
 
         return SpeechBubble(
             id=data.get("id"),
             x=data.get("x", 0),
             y=data.get("y", 0),
-            width=data.get("width", 150),
-            height=data.get("height", 100),
+            width=data.get("width", DEFAULT_BUBBLE_WIDTH),
+            height=data.get("height", DEFAULT_BUBBLE_HEIGHT),
             text=data.get("text", ""),
             bubble_type=bubble_type,
             font_family=data.get("font_family", "Yu Gothic"),
-            font_size=data.get("font_size", 14),
+            font_size=data.get("font_size", 48),
             tail_x=data.get("tail_x", 0),
             tail_y=data.get("tail_y", 0),
-            vertical=data.get("vertical", True)
+            vertical=data.get("vertical", True),
+            auto_font_size=data.get("auto_font_size", True),
+            rotation=data.get("rotation", 0),
+            color=data.get("color", "#000000"),
+            corner_radius=data.get("corner_radius", ROUNDED_RECT_RADIUS)
         )
 
     @staticmethod
-    def _deserialize_text(data: dict) -> TextElement:
-        return TextElement(
+    def _migrate_text_to_bubble(data: dict) -> SpeechBubble:
+        """旧TextElementデータをTEXT_ONLYタイプのSpeechBubbleに変換"""
+        return SpeechBubble(
             id=data.get("id"),
             x=data.get("x", 0),
             y=data.get("y", 0),
+            width=DEFAULT_BUBBLE_WIDTH,
+            height=DEFAULT_BUBBLE_HEIGHT,
             text=data.get("text", ""),
+            bubble_type=BubbleType.TEXT_ONLY,
             font_family=data.get("font_family", "Yu Gothic"),
-            font_size=data.get("font_size", 14),
+            font_size=data.get("font_size", 48),
+            tail_x=0,
+            tail_y=0,
+            vertical=False,  # 旧テキストは横書き
+            auto_font_size=False,
+            rotation=data.get("rotation", 0),
             color=data.get("color", "#000000"),
-            rotation=data.get("rotation", 0)
+            corner_radius=0
         )
 
     @staticmethod

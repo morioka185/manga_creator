@@ -7,11 +7,11 @@ from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QColor, QFont
 
 from src.graphics.speech_bubble_item import SpeechBubbleGraphicsItem
-from src.graphics.text_item import TextGraphicsItem
 from src.graphics.divider_line_item import DividerLineItem
 from src.services.settings_service import SettingsService
+from src.utils.enums import BubbleType
 from src.utils.constants import (
-    DEFAULT_MARGIN, PANEL_MARGIN,
+    DEFAULT_MARGIN, PANEL_MARGIN, ROUNDED_RECT_RADIUS,
     SPINBOX_POSITION_MIN, SPINBOX_POSITION_MAX,
     SPINBOX_SIZE_MIN, SPINBOX_SIZE_MAX,
     SPINBOX_MARGIN_MAX, SPINBOX_GUTTER_MAX, SPINBOX_GUTTER_STEP,
@@ -115,6 +115,11 @@ class PropertyPanel(QWidget):
         scale_row.addWidget(self._scale_spin)
         image_layout.addLayout(scale_row)
 
+        # 左右反転チェックボックス
+        self._flip_horizontal_check = QCheckBox("左右反転")
+        self._flip_horizontal_check.stateChanged.connect(self._on_flip_horizontal_changed)
+        image_layout.addWidget(self._flip_horizontal_check)
+
         # リセットボタン
         self._reset_btn = QPushButton("位置・サイズをリセット")
         self._reset_btn.clicked.connect(self._on_reset_image)
@@ -141,6 +146,39 @@ class PropertyPanel(QWidget):
         line_layout.addLayout(width_row)
         layout.addWidget(self._line_group)
         self._line_group.hide()
+
+        # 吹き出し設定グループ
+        self._bubble_group = QGroupBox("吹き出し")
+        bubble_layout = QVBoxLayout(self._bubble_group)
+        type_row = QHBoxLayout()
+        type_row.addWidget(QLabel("種類:"))
+        self._bubble_type_combo = QComboBox()
+        self._bubble_type_combo.addItem("文字のみ", BubbleType.TEXT_ONLY)
+        self._bubble_type_combo.addItem("楕円", BubbleType.OVAL)
+        self._bubble_type_combo.addItem("吹き出し", BubbleType.SPEECH)
+        self._bubble_type_combo.addItem("長方形", BubbleType.RECTANGLE)
+        self._bubble_type_combo.addItem("もくもく", BubbleType.CLOUD)
+        self._bubble_type_combo.addItem("爆発", BubbleType.EXPLOSION)
+        self._bubble_type_combo.currentIndexChanged.connect(self._on_bubble_type_changed)
+        type_row.addWidget(self._bubble_type_combo)
+        bubble_layout.addLayout(type_row)
+
+        # 角丸度（RECTANGLE用）
+        corner_row = QHBoxLayout()
+        self._corner_label = QLabel("角丸:")
+        corner_row.addWidget(self._corner_label)
+        self._corner_spin = QSpinBox()
+        self._corner_spin.setRange(0, 100)
+        self._corner_spin.setValue(ROUNDED_RECT_RADIUS)
+        self._corner_spin.setSuffix(" px")
+        self._corner_spin.valueChanged.connect(self._on_corner_radius_changed)
+        corner_row.addWidget(self._corner_spin)
+        bubble_layout.addLayout(corner_row)
+        self._corner_label.hide()
+        self._corner_spin.hide()
+
+        layout.addWidget(self._bubble_group)
+        self._bubble_group.hide()
 
         self._font_group = QGroupBox("フォント")
         font_layout = QVBoxLayout(self._font_group)
@@ -169,12 +207,19 @@ class PropertyPanel(QWidget):
         self._color_btn = QPushButton("文字色")
         self._color_btn.clicked.connect(self._on_color_clicked)
         font_layout.addWidget(self._color_btn)
+        self._color_btn.hide()
 
         # 縦書きチェックボックス（吹き出し用）
         self._vertical_check = QCheckBox("縦書き")
         self._vertical_check.setChecked(True)
         self._vertical_check.stateChanged.connect(self._on_vertical_changed)
         font_layout.addWidget(self._vertical_check)
+
+        # フォントサイズ自動調整チェックボックス（吹き出し用）
+        self._auto_font_size_check = QCheckBox("サイズに追従")
+        self._auto_font_size_check.setChecked(True)
+        self._auto_font_size_check.stateChanged.connect(self._on_auto_font_size_changed)
+        font_layout.addWidget(self._auto_font_size_check)
 
         layout.addWidget(self._font_group)
         self._font_group.hide()
@@ -208,7 +253,11 @@ class PropertyPanel(QWidget):
         self._font_group.hide()
         self._rotation_group.hide()
         self._line_group.hide()
+        self._bubble_group.hide()
         self._content_group.hide()
+        self._corner_label.hide()
+        self._corner_spin.hide()
+        self._color_btn.hide()
 
         if not self._current_item:
             return
@@ -230,18 +279,24 @@ class PropertyPanel(QWidget):
 
             # スケール値を更新
             self._scale_spin.blockSignals(True)
+            self._flip_horizontal_check.blockSignals(True)
             image_data = self._current_item.get_image_data()
             if image_data:
                 self._scale_spin.setValue(image_data.scale)
                 self._scale_spin.setEnabled(True)
+                self._flip_horizontal_check.setChecked(image_data.flip_horizontal)
+                self._flip_horizontal_check.setEnabled(True)
                 self._reset_btn.setEnabled(True)
                 self._clear_btn.setEnabled(True)
             else:
                 self._scale_spin.setValue(MIN_IMAGE_SCALE)
                 self._scale_spin.setEnabled(False)
+                self._flip_horizontal_check.setChecked(False)
+                self._flip_horizontal_check.setEnabled(False)
                 self._reset_btn.setEnabled(False)
                 self._clear_btn.setEnabled(False)
             self._scale_spin.blockSignals(False)
+            self._flip_horizontal_check.blockSignals(False)
 
             self._image_group.show()
 
@@ -259,31 +314,53 @@ class PropertyPanel(QWidget):
             self._y_spin.setValue(int(bubble.y))
             self._w_spin.setValue(int(bubble.width))
             self._h_spin.setValue(int(bubble.height))
+
+            # 吹き出しの種類
+            self._bubble_type_combo.blockSignals(True)
+            for i in range(self._bubble_type_combo.count()):
+                if self._bubble_type_combo.itemData(i) == bubble.bubble_type:
+                    self._bubble_type_combo.setCurrentIndex(i)
+                    break
+            self._bubble_type_combo.blockSignals(False)
+            self._bubble_group.show()
+
+            # 角丸度（RECTANGLEの場合のみ表示）
+            if bubble.bubble_type == BubbleType.RECTANGLE:
+                self._corner_label.show()
+                self._corner_spin.show()
+                self._corner_spin.blockSignals(True)
+                self._corner_spin.setValue(int(bubble.corner_radius))
+                self._corner_spin.blockSignals(False)
+
+            # 文字色（TEXT_ONLYの場合のみ表示）
+            if bubble.bubble_type == BubbleType.TEXT_ONLY:
+                self._color_btn.show()
+
+            # 回転
+            self._rotation_spin.blockSignals(True)
+            self._rotation_spin.setValue(int(bubble.rotation))
+            self._rotation_spin.blockSignals(False)
+            self._rotation_group.show()
+
             # 縦書き設定
             self._vertical_check.blockSignals(True)
             self._vertical_check.setChecked(bubble.vertical)
             self._vertical_check.blockSignals(False)
             self._vertical_check.show()
+
+            # フォントサイズ自動調整設定
+            self._auto_font_size_check.blockSignals(True)
+            self._auto_font_size_check.setChecked(bubble.auto_font_size)
+            self._auto_font_size_check.blockSignals(False)
+            self._auto_font_size_check.show()
+
             # テキスト内容
             self._content_edit.blockSignals(True)
             self._content_edit.setPlainText(bubble.text)
             self._content_edit.blockSignals(False)
+
             # スタイル名を更新
             self._refresh_style_combo(bubble.font_family, bubble.font_size)
-            self._font_group.show()
-            self._content_group.show()
-
-        elif isinstance(self._current_item, TextGraphicsItem):
-            text_elem = self._current_item.text_element
-            self._x_spin.setValue(int(text_elem.x))
-            self._y_spin.setValue(int(text_elem.y))
-            self._vertical_check.hide()  # テキスト要素には縦書き設定なし
-            # テキスト内容
-            self._content_edit.blockSignals(True)
-            self._content_edit.setPlainText(self._current_item.toPlainText())
-            self._content_edit.blockSignals(False)
-            # スタイル名を更新
-            self._refresh_style_combo(text_elem.font_family, text_elem.font_size)
             self._font_group.show()
             self._content_group.show()
 
@@ -307,12 +384,26 @@ class PropertyPanel(QWidget):
         if isinstance(self._current_item, SpeechBubbleGraphicsItem):
             self._current_item.bubble.width = self._w_spin.value()
             self._current_item.bubble.height = self._h_spin.value()
+            # 回転の原点も更新
+            self._current_item.setTransformOriginPoint(
+                self._current_item.bubble.width / 2,
+                self._current_item.bubble.height / 2
+            )
             self._current_item.prepareGeometryChange()
             self._current_item.update()
             self.property_changed.emit()
 
     def _on_rotation_changed(self, angle):
-        pass  # 現在は未使用
+        if isinstance(self._current_item, SpeechBubbleGraphicsItem):
+            self._current_item.bubble.rotation = angle
+            self._current_item.setRotation(angle)
+            self.property_changed.emit()
+
+    def _on_corner_radius_changed(self, radius):
+        if isinstance(self._current_item, SpeechBubbleGraphicsItem):
+            self._current_item.bubble.corner_radius = radius
+            self._current_item.update()
+            self.property_changed.emit()
 
     def _on_select_image(self):
         # PanelPolygonItem（コマ領域）
@@ -386,12 +477,6 @@ class PropertyPanel(QWidget):
             self._current_item.bubble.font_family = font.family()
             self._current_item.update()
             self._refresh_style_combo(font.family(), self._current_item.bubble.font_size)
-        elif isinstance(self._current_item, TextGraphicsItem):
-            current_font = self._current_item.font()
-            current_font.setFamily(font.family())
-            self._current_item.setFont(current_font)
-            self._current_item.text_element.font_family = font.family()
-            self._refresh_style_combo(font.family(), self._current_item.text_element.font_size)
         self.property_changed.emit()
 
     def _on_font_size_changed(self, size):
@@ -399,20 +484,16 @@ class PropertyPanel(QWidget):
             self._current_item.bubble.font_size = size
             self._current_item.update()
             self._refresh_style_combo(self._current_item.bubble.font_family, size)
-        elif isinstance(self._current_item, TextGraphicsItem):
-            current_font = self._current_item.font()
-            current_font.setPointSize(size)
-            self._current_item.setFont(current_font)
-            self._current_item.text_element.font_size = size
-            self._refresh_style_combo(self._current_item.text_element.font_family, size)
         self.property_changed.emit()
 
     def _on_color_clicked(self):
-        color = QColorDialog.getColor()
-        if color.isValid() and isinstance(self._current_item, TextGraphicsItem):
-            self._current_item.setDefaultTextColor(color)
-            self._current_item.text_element.color = color.name()
-            self.property_changed.emit()
+        if isinstance(self._current_item, SpeechBubbleGraphicsItem):
+            current_color = QColor(self._current_item.bubble.color)
+            color = QColorDialog.getColor(current_color)
+            if color.isValid():
+                self._current_item.bubble.color = color.name()
+                self._current_item.update()
+                self.property_changed.emit()
 
     def _on_vertical_changed(self, state):
         """縦書き/横書き切替"""
@@ -420,6 +501,49 @@ class PropertyPanel(QWidget):
             self._current_item.bubble.vertical = (state == Qt.CheckState.Checked.value)
             self._current_item.update()
             self.property_changed.emit()
+
+    def _on_bubble_type_changed(self, index):
+        """吹き出しの種類変更"""
+        if isinstance(self._current_item, SpeechBubbleGraphicsItem):
+            bubble_type = self._bubble_type_combo.itemData(index)
+            if bubble_type is not None:
+                self._current_item.bubble.bubble_type = bubble_type
+                self._current_item.prepareGeometryChange()
+                self._current_item.update()
+                # 角丸度の表示/非表示を更新
+                if bubble_type == BubbleType.RECTANGLE:
+                    self._corner_label.show()
+                    self._corner_spin.show()
+                else:
+                    self._corner_label.hide()
+                    self._corner_spin.hide()
+                # 文字色の表示/非表示を更新
+                if bubble_type == BubbleType.TEXT_ONLY:
+                    self._color_btn.show()
+                else:
+                    self._color_btn.hide()
+                self.property_changed.emit()
+
+    def _on_auto_font_size_changed(self, state):
+        """フォントサイズ自動調整切替"""
+        if isinstance(self._current_item, SpeechBubbleGraphicsItem):
+            self._current_item.bubble.auto_font_size = (state == Qt.CheckState.Checked.value)
+            self._current_item.update()
+            self.property_changed.emit()
+
+    def _on_flip_horizontal_changed(self, state):
+        """画像の左右反転切替"""
+        if self._current_item.__class__.__name__ == 'PanelPolygonItem':
+            image_data = self._current_item.get_image_data()
+            if image_data:
+                image_data.flip_horizontal = (state == Qt.CheckState.Checked.value)
+                self._current_item.update()
+                # シーンに保存
+                if self._current_item.scene():
+                    self._current_item.scene()._save_panel_image(
+                        self._current_item.panel_id, image_data
+                    )
+                self.property_changed.emit()
 
     def _on_margin_changed(self, margin):
         """外枠幅変更"""
@@ -436,10 +560,6 @@ class PropertyPanel(QWidget):
         if isinstance(self._current_item, SpeechBubbleGraphicsItem):
             self._current_item.bubble.text = text
             self._current_item.update()
-            self.property_changed.emit()
-        elif isinstance(self._current_item, TextGraphicsItem):
-            self._current_item.setPlainText(text)
-            self._current_item.text_element.text = text
             self.property_changed.emit()
 
     def _refresh_style_combo(self, font_family: str, font_size: int):
@@ -472,12 +592,6 @@ class PropertyPanel(QWidget):
             self._current_item.bubble.font_family = style.font_family
             self._current_item.bubble.font_size = style.font_size
             self._current_item.update()
-        elif isinstance(self._current_item, TextGraphicsItem):
-            font = QFont(style.font_family, style.font_size)
-            font.setBold(style.bold)
-            self._current_item.setFont(font)
-            self._current_item.text_element.font_family = style.font_family
-            self._current_item.text_element.font_size = style.font_size
 
         # フォントコンボとサイズも更新
         self._font_combo.blockSignals(True)
@@ -488,4 +602,3 @@ class PropertyPanel(QWidget):
         self._font_size_spin.blockSignals(False)
 
         self.property_changed.emit()
-

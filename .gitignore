@@ -74,3 +74,17 @@ Thumbs.db
 *.log
 output/
 temp/
+
+# Test files
+test_*.png
+test_*.json
+test.manga
+test_images/
+nul
+
+# Claude temporary files
+tmpclaude-*
+.claude/
+
+# Reference materials
+参考/
